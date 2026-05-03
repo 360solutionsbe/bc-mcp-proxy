@@ -103,7 +103,7 @@ bc-mcp-proxy --TenantId "<tenant-id>" --ClientId "<client-id>" --Environment "<e
 | Custom Auth Header  | `--CustomAuthHeader`   | `BC_CUSTOM_AUTH_HEADER`  | unset (skips device flow when provided)                       |
 | Base URL            | `--BaseUrl`            | `BC_BASE_URL`            | `https://api.businesscentral.dynamics.com`                    |
 | Token Scope         | `--TokenScope`         | `BC_TOKEN_SCOPE`         | `https://api.businesscentral.dynamics.com/.default`           |
-| HTTP Timeout (s)    | `--HttpTimeoutSeconds` | `BC_HTTP_TIMEOUT_SECONDS`| `30.0`                                                        |
+| HTTP Timeout (s)    | `--HttpTimeoutSeconds` | `BC_HTTP_TIMEOUT_SECONDS`| `120.0`                                                       |
 | SSE Timeout (s)     | `--SseTimeoutSeconds`  | `BC_SSE_TIMEOUT_SECONDS` | `300.0`                                                       |
 | Log Level           | `--LogLevel`           | `BC_LOG_LEVEL`           | `INFO`                                                        |
 | Debug               | `--Debug`              | `BC_DEBUG=1`             | off                                                           |
@@ -113,6 +113,17 @@ Token cache locations (when no custom auth header is supplied):
 - **Windows**: `%LOCALAPPDATA%\BcMCPProxyPython\bc_mcp_proxy.bin`
 - **macOS**: `~/Library/Caches/BcMCPProxyPython/bc_mcp_proxy.bin`
 - **Linux**: `$XDG_CACHE_HOME/BcMCPProxyPython/bc_mcp_proxy.bin` (or `~/.cache/…`)
+
+## BC version compatibility
+
+Microsoft changed the MCP endpoint shape in Business Central v28. The proxy detects the host you point it at and adapts:
+
+| BC version | `BC_BASE_URL`                                  | URL shape                                         | Routing info                          |
+|------------|-----------------------------------------------|---------------------------------------------------|---------------------------------------|
+| 26 / 27    | `https://api.businesscentral.dynamics.com`    | `/v2.0/{environment}/mcp` is appended             | `Company`, `ConfigurationName` headers |
+| 28+        | `https://mcp.businesscentral.dynamics.com`    | bare host, no `/v2.0/{env}/mcp` path              | Adds `TenantId` and `EnvironmentName` headers |
+
+Switching is a one-line change in `.env` (or `--BaseUrl` flag); the rest of the configuration stays identical.
 
 ## Why this fork?
 
@@ -148,7 +159,10 @@ python -m pytest
 
 ## Troubleshooting
 
+- **`The MCP Configuration named X was not found or not active`.** Open the configuration in BC and verify the **Active** toggle is on. Saving the page does not flip Active automatically. The error also fires when the `ConfigurationName` header value differs from the BC record by even a trailing space.
 - **Authentication failures.** Verify the redirect URL format (`ms-appx-web://Microsoft.AAD.BrokerPlugin/<clientID>`) and that *"Allow public client flows"* is enabled on the Azure app registration; ensure all API permissions are granted (and admin-consented where required); rerun setup if the device flow times out.
+- **Calls hang or time out (especially in Dynamic Tool Mode).** The first `bc_actions_search` against a configuration with *Discover Additional Objects* enabled enumerates the entire metadata catalog — measured at 50–60s server-side on a Cronus demo. Raise `BC_HTTP_TIMEOUT_SECONDS` (default 120) if you see `httpx.ReadTimeout` on the first call. Subsequent calls within the same session are typically sub-second.
+- **JSON-RPC `-32603 "An error occurred."` with no detail.** This is BC's catch-all when something inside a dynamic-tool call goes wrong. The actual reason is logged to Azure Application Insights as event `RT0054` with custom dimension `toolInvocationFailureReason`. Enable telemetry on the BC environment and query (`traces | where customDimensions.eventId == 'RT0054' | where customDimensions.toolInvocationResult == 'Failure'`) to see what BC actually rejected.
 - **Frequent reconnects in logs.** Inspect upstream availability — the proxy logs `Upstream connection error (...); reconnecting in Xs (attempt N/M)` whenever it retries. After the configured budget the proxy gives up and the local stdio pipe closes.
 - **Repeated sign-in prompts.** The MSAL token cache may not be writable. Pass `--DeviceCacheLocation` to point at a directory you control.
 - **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade vangelder-bc-mcp-proxy`).
