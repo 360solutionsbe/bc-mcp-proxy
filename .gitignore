@@ -46,3 +46,6 @@ Thumbs.db
 # Local secrets / device caches
 *.bin
 .bc_mcp_proxy/
+.env
+.env.*
+!.env.example
