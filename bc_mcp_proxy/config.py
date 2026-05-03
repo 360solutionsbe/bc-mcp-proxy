@@ -21,7 +21,9 @@ class ProxyConfig:
   configuration_name: Optional[str] = None
 
   custom_auth_header: Optional[str] = None
-  http_timeout_seconds: float = 30.0
+  # 30s is too tight for BC v28 dynamic mode with Discover Additional
+  # Objects on — the first bc_actions_search measured ~57s server-side.
+  http_timeout_seconds: float = 120.0
   sse_timeout_seconds: float = 300.0
 
   device_cache_name: str = "bc_mcp_proxy"
