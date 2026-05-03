@@ -11,10 +11,10 @@ requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-  { name = "Stephane Vangelder", email = "stephane@vangeldersolutions.be" }
+  { name = "Stephane Vangelder", email = "dev@360solutions.be" }
 ]
 maintainers = [
-  { name = "Vangelder Solutions", email = "stephane@vangeldersolutions.be" }
+  { name = "360 Solutions", email = "dev@360solutions.be" }
 ]
 keywords = [
   "business-central",
@@ -54,9 +54,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [project.urls]
-Homepage = "https://github.com/VangelderSolutions/bc-mcp-proxy"
-Repository = "https://github.com/VangelderSolutions/bc-mcp-proxy"
-Issues = "https://github.com/VangelderSolutions/bc-mcp-proxy/issues"
+Homepage = "https://github.com/360solutionsbe/bc-mcp-proxy"
+Repository = "https://github.com/360solutionsbe/bc-mcp-proxy"
+Issues = "https://github.com/360solutionsbe/bc-mcp-proxy/issues"
 Upstream = "https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython"
 
 
