@@ -98,10 +98,9 @@
     "log_level": {
       "type": "string",
       "title": "Log level",
-      "description": "Verbosity of the proxy's own logging. INFO is recommended; switch to DEBUG only when troubleshooting.",
+      "description": "Verbosity of the proxy's own logging. One of DEBUG, INFO, WARNING, ERROR. INFO is recommended; switch to DEBUG only when troubleshooting.",
       "required": false,
-      "default": "INFO",
-      "enum": ["DEBUG", "INFO", "WARNING", "ERROR"]
+      "default": "INFO"
     }
   },
   "tools_generated": true

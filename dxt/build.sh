@@ -42,10 +42,14 @@ fi
 find "$build_dir" -type d -name __pycache__ -prune -exec rm -rf {} +
 
 echo "Packing $bundle ..."
-if command -v dxt >/dev/null 2>&1; then
+# Anthropic renamed @anthropic-ai/dxt to @anthropic-ai/mcpb in late 2025.
+# The CLI binary remains `mcpb` (or `dxt` on older installs).
+if command -v mcpb >/dev/null 2>&1; then
+  mcpb pack "$build_dir" "$bundle"
+elif command -v dxt >/dev/null 2>&1; then
   dxt pack "$build_dir" "$bundle"
 else
-  npx --yes @anthropic-ai/dxt pack "$build_dir" "$bundle"
+  npx --yes @anthropic-ai/mcpb pack "$build_dir" "$bundle"
 fi
 
 echo "Built $bundle"

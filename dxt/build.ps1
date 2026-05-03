@@ -42,11 +42,14 @@ if (Test-Path 'dxt/icon.png') {
 Get-ChildItem -Path $buildDir -Recurse -Directory -Filter '__pycache__' | Remove-Item -Recurse -Force
 
 Write-Host "Packing $bundle ..."
-$dxt = Get-Command dxt -ErrorAction SilentlyContinue
-if ($dxt) {
-  & dxt pack $buildDir $bundle
+# Anthropic renamed @anthropic-ai/dxt to @anthropic-ai/mcpb in late 2025.
+# The CLI binary remains `mcpb` (or `dxt` on older installs).
+$cli = Get-Command mcpb -ErrorAction SilentlyContinue
+if (-not $cli) { $cli = Get-Command dxt -ErrorAction SilentlyContinue }
+if ($cli) {
+  & $cli.Source pack $buildDir $bundle
 } else {
-  & npx --yes @anthropic-ai/dxt pack $buildDir $bundle
+  & npx --yes @anthropic-ai/mcpb pack $buildDir $bundle
 }
 
 Write-Host "Built $bundle"
