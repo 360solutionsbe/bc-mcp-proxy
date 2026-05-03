@@ -27,6 +27,9 @@ class ProxyConfig:
   device_cache_name: str = "bc_mcp_proxy"
   device_cache_location: Optional[str] = None
 
+  # Refresh the access token whenever its remaining validity drops below this many seconds.
+  token_refresh_skew_seconds: float = 300.0
+
   log_level: str = "INFO"
   enable_debug: bool = False
 

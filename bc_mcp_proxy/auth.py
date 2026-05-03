@@ -4,14 +4,17 @@ from dataclasses import dataclass
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 import sys
-from typing import Callable, Optional, Protocol
+from typing import Any, Callable, Optional, Protocol
 
 import msal
 from msal_extensions import FilePersistence, PersistedTokenCache
 
 from .config import ProxyConfig
+
+DEFAULT_REFRESH_SKEW_SECONDS = 300.0
 
 
 class TokenProvider(Protocol):
@@ -43,6 +46,8 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
       cache_path: Path,
       logger: Optional[logging.Logger] = None,
       device_flow_callback: Optional[DeviceFlowCallback] = None,
+      refresh_skew_seconds: float = DEFAULT_REFRESH_SKEW_SECONDS,
+      time_source: Callable[[], float] = time.time,
   ) -> None:
     if not tenant_id:
       raise ValueError("Tenant ID is required for device code authentication.")
@@ -64,18 +69,39 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
     )
     self._lock = asyncio.Lock()
     self._flow_callback = device_flow_callback or self._default_flow_callback
+    self._refresh_skew_seconds = max(0.0, refresh_skew_seconds)
+    self._time = time_source
+    self._cached_token: Optional[str] = None
+    self._cached_expires_at: float = 0.0
 
   async def get_token(self) -> str:
     async with self._lock:
+      if self._cached_token is not None and self._remaining_validity() > self._refresh_skew_seconds:
+        return self._cached_token
       return await asyncio.to_thread(self._acquire_token)
 
+  def _remaining_validity(self) -> float:
+    return self._cached_expires_at - self._time()
+
   def _acquire_token(self) -> str:
+    # If we previously cached a token but it has now drifted into the
+    # refresh window, ask MSAL to bypass its in-memory access-token cache
+    # and use the refresh token to mint a new one.
+    needs_force_refresh = self._cached_token is not None
     accounts = self._app.get_accounts() or []
     for account in accounts:
-      result = self._app.acquire_token_silent(self._scopes, account=account)
-      token = self._extract_token(result)
+      kwargs: dict[str, Any] = {"account": account}
+      if needs_force_refresh:
+        kwargs["force_refresh"] = True
+      result = self._app.acquire_token_silent(self._scopes, **kwargs)
+      token = self._store_result(result)
       if token:
-        self._logger.debug("Using cached token for account %s", account.get("username"))
+        self._logger.debug(
+            "Acquired %s MSAL token for account %s (valid for %.0fs)",
+            "refreshed" if needs_force_refresh else "silent",
+            account.get("username"),
+            self._remaining_validity(),
+        )
         return token
 
     flow = self._app.initiate_device_flow(scopes=self._scopes)
@@ -86,19 +112,26 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
     self._flow_callback(flow)
 
     result = self._app.acquire_token_by_device_flow(flow)
-    token = self._extract_token(result)
+    token = self._store_result(result)
     if not token:
-      message = result.get("error_description") or str(result)
+      message = (result or {}).get("error_description") or str(result)
       raise RuntimeError(f"Authentication failed: {message}")
 
     return token
 
-  def _extract_token(self, result: Optional[dict[str, str]]) -> Optional[str]:
-    if not result:
+  def _store_result(self, result: Optional[dict[str, Any]]) -> Optional[str]:
+    """Capture the access token and its expiry so we can refresh pre-emptively."""
+    if not result or "access_token" not in result:
       return None
-    if "access_token" in result:
-      return result["access_token"]
-    return None
+    token = result["access_token"]
+    expires_in_raw = result.get("expires_in", 0)
+    try:
+      expires_in = float(expires_in_raw)
+    except (TypeError, ValueError):
+      expires_in = 0.0
+    self._cached_token = token
+    self._cached_expires_at = self._time() + expires_in
+    return token
 
   def _default_flow_callback(self, flow: dict[str, str]) -> None:
     message = flow.get(
@@ -124,6 +157,7 @@ def create_token_provider(
       scopes=scopes,
       cache_path=cache_path,
       logger=logger,
+      refresh_skew_seconds=config.token_refresh_skew_seconds,
   )
 
 
