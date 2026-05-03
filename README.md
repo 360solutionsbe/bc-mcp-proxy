@@ -19,6 +19,8 @@ The CLI surface is unchanged — every flag and env var from the upstream sample
 
 > ⚠️ **Experimental.** Not for production use. The Business Central MCP endpoint itself is in preview and changes regularly. This fork is a working tool for development and evaluation, not a supported product.
 
+> 📘 **Looking for a step-by-step setup walkthrough?** Read [docs/handleiding-bc-mcp.md](docs/handleiding-bc-mcp.md) — a Dutch end-to-end guide covering Azure App Registration, BC MCP configuration, the proxy install, and common pitfalls. Aimed at BC customers and partners.
+
 ## Prerequisites
 
 - Microsoft Dynamics 365 Business Central environment with the MCP preview feature enabled
