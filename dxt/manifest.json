@@ -10,12 +10,12 @@
     "email": "stephane@vangeldersolutions.be",
     "url": "https://www.vangeldersolutions.be"
   },
-  "homepage": "https://github.com/vangelderSolutions/bc-mcp-proxy",
-  "documentation": "https://github.com/vangelderSolutions/bc-mcp-proxy#readme",
-  "support": "https://github.com/vangelderSolutions/bc-mcp-proxy/issues",
+  "homepage": "https://github.com/VangelderSolutions/bc-mcp-proxy",
+  "documentation": "https://github.com/VangelderSolutions/bc-mcp-proxy#readme",
+  "support": "https://github.com/VangelderSolutions/bc-mcp-proxy/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vangelderSolutions/bc-mcp-proxy"
+    "url": "https://github.com/VangelderSolutions/bc-mcp-proxy"
   },
   "license": "MIT",
   "icon": "icon.png",
