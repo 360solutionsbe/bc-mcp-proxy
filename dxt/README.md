@@ -28,7 +28,7 @@ pwsh dxt/build.ps1
 
 The script:
 1. Stages `manifest.json`, `requirements.txt`, the `bc_mcp_proxy` package and `LICENSE` into `dxt/build/`.
-2. Packs that staging directory into `dist/bc-mcp-proxy-<version>.dxt` using the `@anthropic-ai/dxt` CLI (via `npx` if `dxt` is not on PATH).
+2. Packs that staging directory into `dist/bc-mcp-proxy-<version>.dxt` using the `@anthropic-ai/mcpb` CLI (formerly `@anthropic-ai/dxt`; via `npx` if neither `mcpb` nor `dxt` is on PATH).
 
 The build artifact (`dist/*.dxt` and `dxt/build/`) is git-ignored.
 
@@ -56,7 +56,7 @@ To submit to the Anthropic Extensions Directory:
 The DXT CLI ships a validator:
 
 ```bash
-npx --yes @anthropic-ai/dxt validate dxt/build/manifest.json
+npx --yes @anthropic-ai/mcpb validate dxt/manifest.json
 ```
 
 Run this after any manifest edit to catch schema regressions before packing.
