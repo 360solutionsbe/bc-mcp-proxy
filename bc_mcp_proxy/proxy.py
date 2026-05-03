@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Optional
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import httpx
 from mcp.client.session import ClientSession
@@ -327,6 +327,16 @@ async def run_proxy(config: ProxyConfig) -> None:
       task.result()  # re-raise upstream/server failures
 
 
+def _is_v28_endpoint(base_url: str) -> bool:
+  """Detect the v28+ Business Central MCP host.
+
+  v26/v27: api.businesscentral.dynamics.com/v2.0/{env}/mcp
+  v28+   : mcp.businesscentral.dynamics.com (env now flows through headers)
+  """
+  host = (urlparse(base_url).hostname or "").lower()
+  return host == "mcp.businesscentral.dynamics.com"
+
+
 def _build_transport_headers(config: ProxyConfig) -> dict[str, str]:
   headers: dict[str, str] = {
       "X-Client-Application": config.server_name,
@@ -335,11 +345,21 @@ def _build_transport_headers(config: ProxyConfig) -> dict[str, str]:
     headers["Company"] = unquote(config.company)
   if config.configuration_name:
     headers["ConfigurationName"] = unquote(config.configuration_name)
+  if _is_v28_endpoint(config.base_url):
+    # The v28 host requires routing info in headers because the URL no
+    # longer carries the environment in its path.
+    if config.tenant_id:
+      headers["TenantId"] = config.tenant_id
+    if config.environment:
+      headers["EnvironmentName"] = config.environment
   return headers
 
 
 def _build_endpoint_url(config: ProxyConfig) -> str:
   base = config.base_url.rstrip("/")
+  if _is_v28_endpoint(base):
+    # v28 host expects the bare URL — no /v2.0/{env}/mcp path.
+    return base
   return f"{base}/v2.0/{config.environment}/mcp"
 
 
