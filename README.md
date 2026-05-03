@@ -1,97 +1,243 @@
 # vangelder-bc-mcp-proxy
 
-> **Fork of [microsoft/BCTech `samples/BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython)** — see [Why this fork?](#why-this-fork) below.
+> **Fork of [microsoft/BCTech `samples/BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython)** — a resilient Python MCP stdio proxy that bridges Claude Desktop, VS Code, Cursor and other MCP-compatible clients to the Microsoft Dynamics 365 Business Central MCP HTTP endpoint.
 >
 > Original: Copyright (c) Microsoft Corporation. Modifications: Copyright (c) 2026 Vangelder Solutions. Licensed under the MIT License.
 
-A resilient Python MCP stdio proxy that bridges MCP-compatible clients (Claude Desktop, VS Code, Cursor, Claude Code) to the Microsoft Dynamics 365 Business Central MCP HTTP endpoint.
+> ⚠️ **Experimental.** Not for production use yet. The Business Central MCP endpoint itself is in preview and changes regularly. This fork is a working tool for development and evaluation, not a supported product.
+
+---
+
+## TL;DR
+
+- **What you get**: ask Claude (or another AI client) *"show me the top 10 customers in CRONUS USA by outstanding balance"* and it pulls that data live from **your** BC environment over a secure, authenticated connection. No exports, no copy-paste, no intermediate step.
+- **What it costs**: nothing in licenses — MCP is built into BC starting from version 26 (May 2025 release wave). You choose your AI client (Claude Desktop is free for personal use).
+- **The hard part**: creating an Azure App Registration with the right permissions. Ten minutes for someone IT-comfortable; the toughest part for everyone else. We're happy to help — see the [Need help?](#need-help) section.
 
 ## What this fork adds
 
 - ✅ **Reconnect on transient upstream errors.** `httpx.ReadTimeout`, `RemoteProtocolError`, and `NetworkError` (including the same errors wrapped in an `ExceptionGroup` by anyio) trigger an exponential backoff reconnect — `1s → 2s → 4s → 8s → 16s`, default 5 attempts. The local stdio pipe to your MCP client stays open while reconnecting.
-- ✅ **Pre-emptive MSAL silent token refresh.** Each acquired access token's expiry is tracked locally; when the remaining validity drops below `token_refresh_skew_seconds` (default 300) the next call asks MSAL to mint a new token via `acquire_token_silent(force_refresh=True)` instead of letting Business Central reject the stale one with `Authentication_InvalidCredentials`.
+- ✅ **Pre-emptive MSAL silent token refresh.** Each acquired access token's expiry is tracked locally; when remaining validity drops below `token_refresh_skew_seconds` (default 300) the next call asks MSAL to mint a new token via `acquire_token_silent(force_refresh=True)` instead of letting Business Central reject the stale one with `Authentication_InvalidCredentials`.
 - ✅ **Surface masked upstream errors.** Some Business Central MCP responses ship with `isError: false` but the content is actually an error message ("Semantic search is not enabled", "Authentication_InvalidCredentials", etc.). The proxy now flags those as real MCP errors so the client sees them.
-- ✅ **Pytest test suite.** 35 tests cover error classification, backoff progression including the cap, the give-up path, the attempt-counter reset after a successful connect, MSAL refresh-skew boundaries, and masked-error pattern matching.
+- ✅ **BC v28 endpoint support.** Auto-detects `mcp.businesscentral.dynamics.com` and switches to the new header-based routing (TenantId + EnvironmentName headers) while keeping v26/v27 behaviour intact.
+- ✅ **Pytest test suite.** 45 tests cover error classification, backoff progression, the give-up path, the attempt-counter reset after a successful connect, MSAL refresh-skew boundaries, masked-error pattern matching, and v28 endpoint detection.
 
 The CLI surface is unchanged — every flag and env var from the upstream sample still works.
 
-## Status
+---
 
-> ⚠️ **Experimental.** Not for production use. The Business Central MCP endpoint itself is in preview and changes regularly. This fork is a working tool for development and evaluation, not a supported product.
+## What is the Model Context Protocol?
 
-> 📘 **Looking for a step-by-step setup walkthrough?** Read [docs/handleiding-bc-mcp.md](docs/handleiding-bc-mcp.md) — a Dutch end-to-end guide covering Azure App Registration, BC MCP configuration, the proxy install, and common pitfalls. Aimed at BC customers and partners.
+MCP is an **open standard** Anthropic published in 2024, since adopted by OpenAI, Microsoft and most of the AI tooling industry. It solves one problem: how do you give an AI assistant safe access to your data and systems without building a bespoke integration for every combination?
+
+- An **MCP server** sits on the side of the system that exposes data or actions — in our case, Business Central.
+- An **MCP client** is the AI tool the user interacts with — Claude Desktop, VS Code Copilot, Cursor, ChatGPT desktop with MCP support.
+- Between them, **tools** are exchanged in a standardised format: name, description, parameter schema, and the result of an invocation.
+
+Microsoft has, since **Business Central 2025 release wave 1 (version 26)**, shipped a built-in MCP server in every BC environment. It listens on a Microsoft-hosted endpoint, validates your OAuth token, and exposes your configuration as a set of tools the AI client can call.
+
+## What this proxy does (and why you need it)
+
+The BC MCP server speaks **HTTP** — a streamable-HTTP variant with Server-Sent Events. Most AI clients (Claude Desktop, VS Code, Cursor) run locally on your machine and speak **stdio** to their MCP servers, not HTTP.
+
+The proxy is the translator:
+
+```
+┌─────────────────┐  stdio    ┌──────────────────┐  HTTPS + OAuth   ┌────────────────────────┐
+│  Claude Desktop │ ◄────────►│ bc-mcp-proxy     │ ◄───────────────►│ Business Central MCP   │
+│  / VS Code      │           │ (on your machine)│                  │ (Microsoft-hosted)     │
+└─────────────────┘           └──────────────────┘                  └────────────────────────┘
+```
+
+---
 
 ## Prerequisites
 
-- Microsoft Dynamics 365 Business Central environment with the MCP preview feature enabled
-- Azure tenant with appropriate permissions
-- Python 3.10 or later
-- An MCP-compatible client (Claude Desktop, VS Code, Cursor, …)
+| Item | Detail |
+|---|---|
+| **BC environment** | Version 26.0 or later. Sandbox or production. The MCP feature is enabled by default from v26. |
+| **Microsoft Entra (Azure AD) tenant** | With **administrator** rights — you'll create an App Registration and grant API permissions. |
+| **An AI client** | Claude Desktop (free), VS Code with MCP support, Cursor, or any other stdio-MCP capable tool. |
+| **Python 3.10+** on your machine | Or use the Claude Desktop Extension (`.dxt`) bundle once published. |
 
-## Installation
+---
+
+## Step-by-step setup
+
+### Step 1 — Azure App Registration
+
+In the Azure portal:
+
+1. Open **Microsoft Entra ID** → **App registrations** → **New registration**.
+2. Name it something recognisable, e.g. `BC MCP Proxy — production`.
+3. Supported account types: **Accounts in this organizational directory only** (single tenant).
+4. Leave the Redirect URI blank for now.
+5. Click **Register**. Note the **Application (client) ID** and **Directory (tenant) ID**.
+
+Then in the same app:
+
+6. **Authentication** → **Add a platform** → **Mobile and desktop applications** → enter:
+   ```
+   ms-appx-web://Microsoft.AAD.BrokerPlugin/<your-client-id>
+   ```
+7. Lower on the same page: set **"Allow public client flows"** to **Yes**, save.
+
+Permissions:
+
+8. **API permissions** → **Add a permission** → **Dynamics 365 Business Central** → **Delegated permissions**:
+   - Tick `Financials.ReadWrite.All` (or `Financials.Read.All` for read-only).
+   - Tick `user_impersonation`.
+9. Click **Add permissions**, then **Grant admin consent for [tenant]**.
+
+> Without admin consent the first sign-in will fail. The green checkmarks next to each permission after *Grant admin consent* are the signal that you're done.
+
+### Step 2 — Create a BC MCP Configuration
+
+In Business Central, in your target environment:
+
+1. Search for **"MCP Server Configurations"** (the page is also titled *Model Context Protocol Server Configurations*).
+2. Click **+ New**.
+3. Fill in:
+   - **Name**: e.g. `Default MCP`. The name flows through as a header — case and trailing whitespace matter.
+   - **Active**: **switch on**. ← *The* most common pitfall: you save the page (BC shows "Saved"), but Active is off by default. Without `Active = Yes` BC rejects every tool call with *"The MCP Configuration named X was not found or not active"*.
+   - **Dynamic Tool Mode**:
+     - **Off (Static mode)** — BC generates one `List_<EntityName>_PAG<id>` tool per selected page. Predictable, fast, but you choose tools up front.
+     - **On (Dynamic mode)** — BC offers three generic tools (`bc_actions_search`, `bc_actions_describe`, `bc_actions_invoke`) that let the AI client search, describe and invoke an action at runtime. Far more flexible, but slower on first call (see below).
+   - **Discover Additional Objects** (only relevant in dynamic mode): tick this to expose objects outside your explicit toolset for read-only discovery.
+4. Add **System Tools** or **Available Tools** as needed.
+5. **Save**.
+
+> **Tip**: create two configurations with the same toolset, one with `Active = No` and one with `Active = Yes`. That way you can experiment safely without touching the live config.
+
+### Step 3 — Install the proxy
 
 ```bash
 python -m pip install --upgrade vangelder-bc-mcp-proxy
 ```
 
-The PyPI distribution name is `vangelder-bc-mcp-proxy`; the Python module and CLI are still `bc_mcp_proxy` / `bc-mcp-proxy`, so existing client configurations from the upstream sample keep working.
+Or from source:
 
-> Until this fork is published to PyPI, install from a local clone:
-> ```bash
-> git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
-> cd bc-mcp-proxy
-> python -m pip install -e .
-> ```
+```bash
+git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
+cd bc-mcp-proxy
+python -m pip install -e .
+```
 
-## Setup
+Verify:
 
-### 1. Set up an Azure AD app registration
+```bash
+python -m bc_mcp_proxy --help
+```
 
-1. Open [ms.portal.azure.com](https://ms.portal.azure.com).
-2. Navigate to **Microsoft Entra ID** and create a new **App Registration**.
-3. Under **Authentication**, add a desktop redirect URL of the form:
-   ```
-   ms-appx-web://Microsoft.AAD.BrokerPlugin/<clientID>
-   ```
-   Enable **"Allow public client flows"**.
-4. Add API permissions (Delegated):
-   - **Dynamics 365 Business Central**
-     - `Financials.ReadWrite.All`
-     - `user_impersonation`
+### Step 4 — Configure
 
-### 2. Run the interactive setup
+Create a `.env` next to the proxy (this file is git-ignored):
+
+```ini
+BC_TENANT_ID=<your-tenant-id>
+BC_CLIENT_ID=<your-client-id-from-step-1>
+BC_ENVIRONMENT=Production
+BC_COMPANY=CRONUS USA
+BC_CONFIGURATION_NAME=Default MCP
+```
+
+**For BC v28 or later** add:
+
+```ini
+BC_BASE_URL=https://mcp.businesscentral.dynamics.com
+```
+
+(For v26/v27 omit `BC_BASE_URL` — the default `api.businesscentral.dynamics.com` is correct.)
+
+### Step 5 — Wire it into your AI client
+
+#### Claude Desktop
+
+Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac):
+
+```json
+{
+  "mcpServers": {
+    "business-central": {
+      "command": "python",
+      "args": [
+        "-m", "bc_mcp_proxy",
+        "--TenantId", "<your-tenant-id>",
+        "--ClientId", "<your-client-id>",
+        "--Environment", "Production",
+        "--Company", "CRONUS USA",
+        "--ConfigurationName", "Default MCP"
+      ]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. Your BC tools are now available in every chat.
+
+#### VS Code / Cursor
+
+Both support MCP via a similar JSON config. The repository ships a `python -m bc_mcp_proxy setup` wizard that generates ready-to-paste install links for Cursor and VS Code, plus a Claude Desktop snippet:
 
 ```bash
 python -m bc_mcp_proxy setup
 ```
 
-The wizard prompts for tenant ID, client ID, environment, and company; runs the device-code flow; and writes ready-to-paste configurations into `~/.bc_mcp_proxy/` (or `%USERPROFILE%\.bc_mcp_proxy\` on Windows) plus install URLs for Cursor and VS Code and a snippet for Claude Desktop.
+### Step 6 — First sign-in
 
-### 3. Add the proxy to your MCP client
+The very first tool call walks the **device code flow**:
 
-The setup command produces:
-
-- a clickable **Cursor** install URL,
-- a clickable **VS Code** install URL,
-- a `claude_mcp.json` snippet to drop into your `claude_desktop_config.json`.
-
-Restart your MCP client; Business Central tools should appear.
-
-## Running manually
-
-```bash
-python -m bc_mcp_proxy \
-  --TenantId    "<tenant-id>" \
-  --ClientId    "<client-id>" \
-  --Environment "<environment>" \
-  --Company     "<company>"
+```
+To sign in, use a web browser to open https://microsoft.com/devicelogin
+and enter the code ABCD-1234 to authenticate.
 ```
 
-or via the entry point script:
+Open the URL, paste the code, sign in with the Azure account that has the BC permissions. Your token is then cached locally (via `msal-extensions` with platform-specific secure storage). Subsequent runs are non-interactive until expiry — at which point the proxy refreshes silently using the refresh token.
 
-```bash
-bc-mcp-proxy --TenantId "<tenant-id>" --ClientId "<client-id>" --Environment "<environment>" --Company "<company>"
-```
+---
+
+## First test: ask your AI
+
+Restart your AI client and try:
+
+- *"Show me the top 5 customers in CRONUS USA."*
+- *"Which vendors have an outstanding balance over €5,000?"*
+- *"List Sales Invoices from last month with status Open."*
+
+In **static mode** the AI picks the tool directly (e.g. `ListCustomers_PAG30009`) with parameters (`top: 5`).
+
+In **dynamic mode** you'll see three steps — `bc_actions_search` → `bc_actions_describe` → `bc_actions_invoke`.
+
+Both modes return the same data. Which one to choose depends on how big your BC installation is and how much flexibility you want to give the AI.
+
+---
+
+## Static vs Dynamic Tool Mode
+
+| | **Static** | **Dynamic** |
+|---|---|---|
+| **Tools the AI sees** | One per selected page (e.g. 10 tools) | Three generic tools |
+| **First-call performance** | Fast (sub-second) | Slow on first call (50–60s when *Discover Additional Objects* is on, while BC walks the catalog) |
+| **Subsequent calls** | Fast | Fast — the catalog is cached |
+| **AI prompt cost** | Higher (the AI sees all tool schemas) | Lower (only three meta-tools) |
+| **Best for** | A bounded set of use cases you've explicitly chosen to expose | Flexible exploration, especially with many pages |
+
+Our recommendation: start with **static mode** for the first test (fast feedback, you know exactly which tools exist). Switch to **dynamic** once your users start asking things you didn't preselect a tool for.
+
+---
+
+## BC version compatibility
+
+Microsoft changed the MCP endpoint shape in BC v28. The proxy detects the host you point it at and adapts:
+
+| BC version | `BC_BASE_URL`                                  | URL shape                             | Routing info                                  |
+|------------|-----------------------------------------------|---------------------------------------|-----------------------------------------------|
+| 26 / 27    | `https://api.businesscentral.dynamics.com`    | `/v2.0/{environment}/mcp` is appended | `Company`, `ConfigurationName` headers        |
+| 28+        | `https://mcp.businesscentral.dynamics.com`    | bare host, no path                    | Adds `TenantId` and `EnvironmentName` headers |
+
+Switching is a single-line change in `.env` or `--BaseUrl`; everything else stays identical.
+
+---
 
 ## Configuration parameters
 
@@ -116,16 +262,19 @@ Token cache locations (when no custom auth header is supplied):
 - **macOS**: `~/Library/Caches/BcMCPProxyPython/bc_mcp_proxy.bin`
 - **Linux**: `$XDG_CACHE_HOME/BcMCPProxyPython/bc_mcp_proxy.bin` (or `~/.cache/…`)
 
-## BC version compatibility
+---
 
-Microsoft changed the MCP endpoint shape in Business Central v28. The proxy detects the host you point it at and adapts:
+## Troubleshooting
 
-| BC version | `BC_BASE_URL`                                  | URL shape                                         | Routing info                          |
-|------------|-----------------------------------------------|---------------------------------------------------|---------------------------------------|
-| 26 / 27    | `https://api.businesscentral.dynamics.com`    | `/v2.0/{environment}/mcp` is appended             | `Company`, `ConfigurationName` headers |
-| 28+        | `https://mcp.businesscentral.dynamics.com`    | bare host, no `/v2.0/{env}/mcp` path              | Adds `TenantId` and `EnvironmentName` headers |
+- **`The MCP Configuration named X was not found or not active`.** Open the configuration in BC and verify the **Active** toggle is on. Saving the page does not flip Active automatically. The error also fires when the `ConfigurationName` header value differs from the BC record by even a trailing space.
+- **Authentication failures.** Verify the redirect URL format (`ms-appx-web://Microsoft.AAD.BrokerPlugin/<clientID>`) and that *"Allow public client flows"* is enabled on the Azure app registration; ensure all API permissions are granted (and admin-consented where required); rerun setup if the device flow times out.
+- **Calls hang or time out (especially in Dynamic Tool Mode).** The first `bc_actions_search` against a configuration with *Discover Additional Objects* enabled enumerates the entire metadata catalog — measured at 50–60s server-side on a Cronus demo. Raise `BC_HTTP_TIMEOUT_SECONDS` (default 120) if you see `httpx.ReadTimeout` on the first call. Subsequent calls within the same session are typically sub-second.
+- **JSON-RPC `-32603 "An error occurred."` with no detail.** This is BC's catch-all when something inside a dynamic-tool call goes wrong. The actual reason is logged to Azure Application Insights as event `RT0054` with custom dimension `toolInvocationFailureReason`. Enable telemetry on the BC environment and query (`traces | where customDimensions.eventId == 'RT0054' | where customDimensions.toolInvocationResult == 'Failure'`) to see what BC actually rejected.
+- **Frequent reconnects in logs.** Inspect upstream availability — the proxy logs `Upstream connection error (...); reconnecting in Xs (attempt N/M)` whenever it retries. After the configured budget the proxy gives up and the local stdio pipe closes.
+- **Repeated sign-in prompts.** The MSAL token cache may not be writable. Pass `--DeviceCacheLocation` to point at a directory you control.
+- **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade vangelder-bc-mcp-proxy`).
 
-Switching is a one-line change in `.env` (or `--BaseUrl` flag); the rest of the configuration stays identical.
+---
 
 ## Why this fork?
 
@@ -139,6 +288,8 @@ Three issues were reproducible against the upstream `BcMCPProxyPython` sample in
 
 The CLI surface and on-disk configuration layout are unchanged so this is a drop-in replacement.
 
+---
+
 ## Claude Desktop Extension
 
 A `.dxt` bundle for one-click install in Claude Desktop is built from the source in [`dxt/`](dxt/README.md):
@@ -148,7 +299,19 @@ pwsh dxt/build.ps1     # Windows
 ./dxt/build.sh         # macOS / Linux
 ```
 
-The output (`dist/bc-mcp-proxy-<version>.dxt`) installs into Claude Desktop, prompts for tenant ID / client ID / environment / company, and runs the same proxy as the CLI version.
+The output (`dist/bc-mcp-proxy-<version>.dxt`) installs into Claude Desktop, prompts for tenant ID / client ID / environment / company / configuration name, and runs the same proxy as the CLI version.
+
+---
+
+## Security
+
+- **No application secrets.** Delegated permissions only via the device-code flow. No client secret to manage or rotate.
+- **Tokens cached locally** via `msal-extensions` with OS-specific secure storage (DPAPI on Windows, Keychain on macOS, libsecret on Linux). No plaintext on disk.
+- **No tokens in logs.** The proxy never logs access or refresh tokens; debug output contains only expiry timestamps for diagnosis.
+- **Permissions are delegated.** Whatever the proxy can see and do, the signed-in user could already do manually in BC. The AI gets no extra rights.
+- **Configuration name as gate.** In BC you decide per MCP Configuration which pages and objects are exposed. Put sensitive data behind a separate configuration that you only flip Active for specific users.
+
+---
 
 ## Development
 
@@ -159,22 +322,39 @@ python -m pip install -e ".[test]"
 python -m pytest
 ```
 
-## Troubleshooting
+---
 
-- **`The MCP Configuration named X was not found or not active`.** Open the configuration in BC and verify the **Active** toggle is on. Saving the page does not flip Active automatically. The error also fires when the `ConfigurationName` header value differs from the BC record by even a trailing space.
-- **Authentication failures.** Verify the redirect URL format (`ms-appx-web://Microsoft.AAD.BrokerPlugin/<clientID>`) and that *"Allow public client flows"* is enabled on the Azure app registration; ensure all API permissions are granted (and admin-consented where required); rerun setup if the device flow times out.
-- **Calls hang or time out (especially in Dynamic Tool Mode).** The first `bc_actions_search` against a configuration with *Discover Additional Objects* enabled enumerates the entire metadata catalog — measured at 50–60s server-side on a Cronus demo. Raise `BC_HTTP_TIMEOUT_SECONDS` (default 120) if you see `httpx.ReadTimeout` on the first call. Subsequent calls within the same session are typically sub-second.
-- **JSON-RPC `-32603 "An error occurred."` with no detail.** This is BC's catch-all when something inside a dynamic-tool call goes wrong. The actual reason is logged to Azure Application Insights as event `RT0054` with custom dimension `toolInvocationFailureReason`. Enable telemetry on the BC environment and query (`traces | where customDimensions.eventId == 'RT0054' | where customDimensions.toolInvocationResult == 'Failure'`) to see what BC actually rejected.
-- **Frequent reconnects in logs.** Inspect upstream availability — the proxy logs `Upstream connection error (...); reconnecting in Xs (attempt N/M)` whenever it retries. After the configured budget the proxy gives up and the local stdio pipe closes.
-- **Repeated sign-in prompts.** The MSAL token cache may not be writable. Pass `--DeviceCacheLocation` to point at a directory you control.
-- **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade vangelder-bc-mcp-proxy`).
+## Need help?
 
-## Security
+The Azure App Registration and the right permissions take attention to detail. For customers who would rather not deal with `Manifest.json`, redirect URIs and delegated permissions themselves, **Vangelder Solutions** offers an **end-to-end MCP setup package**:
 
-- Delegated Azure permissions only; no application secrets are stored or required.
-- Tokens cached via `msal-extensions` using platform-appropriate secure storage.
-- The proxy never logs the access token or the refresh token; debug logs include only token expiry timestamps.
+- Azure App Registration created and validated in your tenant
+- BC MCP Configuration created on the right environment(s)
+- Proxy plus AI client (Claude Desktop, VS Code, Cursor) installed and tested on your workstation
+- Short user training: which questions work well, which don't, what the privacy and cost trade-offs look like
+- Optional: Application Insights telemetry hookup so you can see who uses which tools later
+
+One appointment (online or on-site), configuration done, MCP working in your production environment.
+
+📧 **stephane@vangeldersolutions.be**
+🌐 [www.vangeldersolutions.be](https://www.vangeldersolutions.be)
+📦 [github.com/VangelderSolutions/bc-mcp-proxy](https://github.com/VangelderSolutions/bc-mcp-proxy)
+
+---
+
+## Sources
+
+- [`vangelder-bc-mcp-proxy` on GitHub](https://github.com/VangelderSolutions/bc-mcp-proxy) — this fork, MIT-licensed
+- [`microsoft/BCTech BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython) — Microsoft's reference implementation
+- [Configure Business Central MCP Server](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/ai/configure-mcp-server) — Microsoft Learn
+- [Analyze MCP Server Tool Calls Telemetry](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/telemetry-mcp-server-trace) — RT0054 event reference
+- [Model Context Protocol specification](https://modelcontextprotocol.io) — Anthropic
+- [Claude Desktop Extensions (DXT)](https://github.com/anthropics/dxt) — for one-click install bundles
+
+---
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [`LICENSE`](LICENSE).
+
+Original work © Microsoft Corporation. Modifications © 2026 Vangelder Solutions.

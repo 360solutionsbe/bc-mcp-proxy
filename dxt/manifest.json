@@ -75,7 +75,7 @@
     "environment": {
       "type": "string",
       "title": "Business Central Environment",
-      "description": "The Business Central environment name (for example: Production, Sandbox, Demo123). Must match the environment as it appears in the BC admin center.",
+      "description": "The Business Central environment name (for example: Production, Sandbox, MyDevEnv). Must match the environment as it appears in the BC admin center.",
       "default": "Production",
       "required": true,
       "sensitive": false
