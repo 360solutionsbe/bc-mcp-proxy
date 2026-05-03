@@ -1,0 +1,108 @@
+{
+  "dxt_version": "0.1",
+  "name": "bc-mcp-proxy",
+  "display_name": "Business Central MCP Proxy",
+  "version": "0.2.0",
+  "description": "Bridge Claude Desktop to a Microsoft Dynamics 365 Business Central environment via the official BC MCP endpoint.",
+  "long_description": "Resilient stdio MCP proxy that forwards tool calls from Claude Desktop to the Business Central MCP HTTP endpoint. Forked from microsoft/BCTech samples/BcMCPProxyPython with three production fixes: reconnect on transient httpx errors with exponential backoff, pre-emptive MSAL silent token refresh, and surfacing of upstream errors that arrive masked as successful responses. Tenant ID, client ID, environment and company are configured at install time via the prompts below.",
+  "author": {
+    "name": "Stephane Vangelder",
+    "email": "stephane@vangeldersolutions.be",
+    "url": "https://www.vangeldersolutions.be"
+  },
+  "homepage": "https://github.com/vangelderSolutions/bc-mcp-proxy",
+  "documentation": "https://github.com/vangelderSolutions/bc-mcp-proxy#readme",
+  "support": "https://github.com/vangelderSolutions/bc-mcp-proxy/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vangelderSolutions/bc-mcp-proxy"
+  },
+  "license": "MIT",
+  "icon": "icon.png",
+  "keywords": [
+    "business-central",
+    "dynamics-365",
+    "mcp",
+    "erp",
+    "microsoft"
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.10 <4"
+    }
+  },
+  "server": {
+    "type": "python",
+    "entry_point": "server/bc_mcp_proxy/__main__.py",
+    "mcp_config": {
+      "command": "python",
+      "args": [
+        "-m",
+        "bc_mcp_proxy",
+        "--TenantId",
+        "${user_config.tenant_id}",
+        "--ClientId",
+        "${user_config.client_id}",
+        "--Environment",
+        "${user_config.environment}",
+        "--Company",
+        "${user_config.company}"
+      ],
+      "env": {
+        "PYTHONPATH": "${__dirname}/server",
+        "BC_CONFIGURATION_NAME": "${user_config.configuration_name}",
+        "BC_LOG_LEVEL": "${user_config.log_level}"
+      }
+    }
+  },
+  "user_config": {
+    "tenant_id": {
+      "type": "string",
+      "title": "Azure Tenant ID",
+      "description": "The Directory (tenant) ID of the Azure Active Directory hosting your Business Central environment. Find it in the Azure portal under Microsoft Entra ID > Overview.",
+      "required": true,
+      "sensitive": false
+    },
+    "client_id": {
+      "type": "string",
+      "title": "Azure Client ID",
+      "description": "The Application (client) ID of the Azure App Registration you created for this proxy. The app must have the Dynamics 365 Business Central delegated permissions (Financials.ReadWrite.All, user_impersonation) and 'Allow public client flows' enabled.",
+      "required": true,
+      "sensitive": false
+    },
+    "environment": {
+      "type": "string",
+      "title": "Business Central Environment",
+      "description": "The Business Central environment name (for example: Production, Sandbox, MyDevEnv). Must match the environment as it appears in the BC admin center.",
+      "default": "Production",
+      "required": true,
+      "sensitive": false
+    },
+    "company": {
+      "type": "string",
+      "title": "Business Central Company",
+      "description": "The exact company name within the environment (case-sensitive). Example: 'CRONUS USA' or 'My Company Ltd.'.",
+      "required": true,
+      "sensitive": false
+    },
+    "configuration_name": {
+      "type": "string",
+      "title": "BC MCP Configuration Name",
+      "description": "Optional name of a specific Business Central MCP configuration to forward as the ConfigurationName header. Leave empty if your environment doesn't use named configurations.",
+      "required": false,
+      "sensitive": false,
+      "default": ""
+    },
+    "log_level": {
+      "type": "string",
+      "title": "Log level",
+      "description": "Verbosity of the proxy's own logging. INFO is recommended; switch to DEBUG only when troubleshooting.",
+      "required": false,
+      "default": "INFO",
+      "enum": ["DEBUG", "INFO", "WARNING", "ERROR"]
+    }
+  },
+  "tools_generated": true
+}

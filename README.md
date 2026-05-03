@@ -126,6 +126,17 @@ Three issues were reproducible against the upstream `BcMCPProxyPython` sample in
 
 The CLI surface and on-disk configuration layout are unchanged so this is a drop-in replacement.
 
+## Claude Desktop Extension
+
+A `.dxt` bundle for one-click install in Claude Desktop is built from the source in [`dxt/`](dxt/README.md):
+
+```bash
+pwsh dxt/build.ps1     # Windows
+./dxt/build.sh         # macOS / Linux
+```
+
+The output (`dist/bc-mcp-proxy-<version>.dxt`) installs into Claude Desktop, prompts for tenant ID / client ID / environment / company, and runs the same proxy as the CLI version.
+
 ## Development
 
 ```bash

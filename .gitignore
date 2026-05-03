@@ -10,6 +10,10 @@ dist/
 *.egg
 wheels/
 
+# DXT bundle build output
+dxt/build/
+*.dxt
+
 # Virtual environments
 .venv/
 venv/
