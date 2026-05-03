@@ -10,7 +10,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Implementation
+from mcp.types import CallToolResult, Implementation
 
 from .auth import TokenProvider, create_token_provider
 from .config import ProxyConfig
@@ -31,6 +31,16 @@ _RECOVERABLE_HTTPX_ERRORS: tuple[type[BaseException], ...] = (
 DEFAULT_RECONNECT_MAX_ATTEMPTS = 5
 DEFAULT_RECONNECT_BASE_BACKOFF = 1.0
 DEFAULT_RECONNECT_MAX_BACKOFF = 16.0
+
+# Substrings that indicate the upstream returned an error message inside a
+# successful (isError=False) response. Match is case-insensitive.
+_MASKED_ERROR_PATTERNS: tuple[str, ...] = (
+    "Authentication_InvalidCredentials",
+    "is not enabled",
+    "Internal Server Error",
+    "BadRequest_NotFound",
+    "Bad Request",
+)
 
 
 class _AsyncBearerAuth(httpx.Auth):
@@ -66,6 +76,34 @@ def _is_recoverable_upstream_error(exc: BaseException) -> bool:
   if not leaves:
     return False
   return all(isinstance(leaf, _RECOVERABLE_HTTPX_ERRORS) for leaf in leaves)
+
+
+def _detect_masked_error(result: CallToolResult) -> Optional[str]:
+  """If `result` claims success but its text content contains a known error
+  pattern, return the offending text. Otherwise return None.
+
+  Example: the BC MCP endpoint returns `isError: false` with content
+  `"Semantic search is not enabled for this environment"` when the
+  feature isn't licensed — clients then treat the failure as a normal
+  tool result, hiding the cause from the user.
+  """
+  if getattr(result, "isError", False):
+    return None
+  content = getattr(result, "content", None) or []
+  for item in content:
+    text = getattr(item, "text", None)
+    if not isinstance(text, str) or not text:
+      continue
+    lowered = text.lower()
+    for pattern in _MASKED_ERROR_PATTERNS:
+      if pattern.lower() in lowered:
+        return text
+  return None
+
+
+def _flag_as_error(result: CallToolResult) -> CallToolResult:
+  """Return a CallToolResult with isError=True, preserving content."""
+  return result.model_copy(update={"isError": True})
 
 
 def _backoff_for_attempt(
@@ -251,7 +289,15 @@ async def run_proxy(config: ProxyConfig) -> None:
   async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     session = await state.wait_active()
     logger.debug("Calling tool '%s' (session %s)", name, state.session_id() or "<pending>")
-    return await session.call_tool(name, arguments or {})
+    result = await session.call_tool(name, arguments or {})
+    masked = _detect_masked_error(result)
+    if masked is not None:
+      logger.warning(
+          "Upstream returned masked error for tool '%s'; flagging as error: %s",
+          name, masked,
+      )
+      return _flag_as_error(result)
+    return result
 
   init_options = server.create_initialization_options()
 
