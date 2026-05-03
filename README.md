@@ -36,7 +36,7 @@ The PyPI distribution name is `vangelder-bc-mcp-proxy`; the Python module and CL
 
 > Until this fork is published to PyPI, install from a local clone:
 > ```bash
-> git clone https://github.com/vangelderSolutions/bc-mcp-proxy.git
+> git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
 > cd bc-mcp-proxy
 > python -m pip install -e .
 > ```
@@ -140,7 +140,7 @@ The output (`dist/bc-mcp-proxy-<version>.dxt`) installs into Claude Desktop, pro
 ## Development
 
 ```bash
-git clone https://github.com/vangelderSolutions/bc-mcp-proxy.git
+git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
 cd bc-mcp-proxy
 python -m pip install -e ".[test]"
 python -m pytest

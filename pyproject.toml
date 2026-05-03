@@ -54,9 +54,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [project.urls]
-Homepage = "https://github.com/vangelderSolutions/bc-mcp-proxy"
-Repository = "https://github.com/vangelderSolutions/bc-mcp-proxy"
-Issues = "https://github.com/vangelderSolutions/bc-mcp-proxy/issues"
+Homepage = "https://github.com/VangelderSolutions/bc-mcp-proxy"
+Repository = "https://github.com/VangelderSolutions/bc-mcp-proxy"
+Issues = "https://github.com/VangelderSolutions/bc-mcp-proxy/issues"
 Upstream = "https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython"
 
 
