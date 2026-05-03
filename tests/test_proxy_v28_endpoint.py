@@ -38,15 +38,15 @@ def test_legacy_endpoint_url_has_path_with_environment() -> None:
 def test_legacy_endpoint_url_strips_trailing_slash_on_base() -> None:
   cfg = ProxyConfig(
       base_url="https://api.businesscentral.dynamics.com/",
-      environment="MyDevEnv",
+      environment="Sandbox",
   )
-  assert _build_endpoint_url(cfg) == "https://api.businesscentral.dynamics.com/v2.0/MyDevEnv/mcp"
+  assert _build_endpoint_url(cfg) == "https://api.businesscentral.dynamics.com/v2.0/Sandbox/mcp"
 
 
 def test_v28_endpoint_url_is_bare_host() -> None:
   cfg = ProxyConfig(
       base_url="https://mcp.businesscentral.dynamics.com",
-      environment="MyDevEnv",
+      environment="Sandbox",
   )
   assert _build_endpoint_url(cfg) == "https://mcp.businesscentral.dynamics.com"
 
@@ -71,13 +71,13 @@ def test_v28_headers_include_tenant_id_and_environment_name() -> None:
   cfg = ProxyConfig(
       base_url="https://mcp.businesscentral.dynamics.com",
       tenant_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-      environment="MyDevEnv",
+      environment="Sandbox",
       company="CRONUS USA",
       configuration_name="My MCP Configuration",
   )
   h = _build_transport_headers(cfg)
   assert h["TenantId"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-  assert h["EnvironmentName"] == "MyDevEnv"
+  assert h["EnvironmentName"] == "Sandbox"
   assert h["Company"] == "CRONUS USA"
   assert h["ConfigurationName"] == "My MCP Configuration"
 
@@ -87,8 +87,8 @@ def test_v28_headers_omit_tenant_when_not_configured() -> None:
   cfg = ProxyConfig(
       base_url="https://mcp.businesscentral.dynamics.com",
       tenant_id=None,
-      environment="MyDevEnv",
+      environment="Sandbox",
   )
   h = _build_transport_headers(cfg)
   assert "TenantId" not in h
-  assert h["EnvironmentName"] == "MyDevEnv"
+  assert h["EnvironmentName"] == "Sandbox"

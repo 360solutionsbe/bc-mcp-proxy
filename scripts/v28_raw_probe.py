@@ -3,6 +3,11 @@ MCP host (https://mcp.businesscentral.dynamics.com)?
 
 v28 changes the endpoint shape: no /v2.0/{env}/mcp path; the env now
 travels as an EnvironmentName header alongside TenantId.
+
+Reads BC_TENANT_ID, BC_CLIENT_ID, BC_ENVIRONMENT, BC_COMPANY and
+BC_CONFIGURATION_NAME from .env (or the process environment). Set
+BC_BASE_URL=https://mcp.businesscentral.dynamics.com in .env for v28,
+or override V28_URL below if Microsoft renames the host again.
 """
 
 from __future__ import annotations
@@ -21,8 +26,6 @@ from bc_mcp_proxy.config import ProxyConfig
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 V28_URL = "https://mcp.businesscentral.dynamics.com"
-V28_ENVIRONMENT = "MyDevEnv"
-V28_CONFIGURATION = "My MCP Configuration"
 
 
 def _load_dotenv(path: Path) -> None:
@@ -50,14 +53,12 @@ def _data_lines(body: str):
 async def main() -> None:
   _load_dotenv(REPO_ROOT / ".env")
 
-  # Use the v28 values explicitly (don't depend on .env contents that may
-  # still point at the v26/v27 environment).
   config = ProxyConfig(
       tenant_id=os.environ["BC_TENANT_ID"],
       client_id=os.environ["BC_CLIENT_ID"],
-      environment=V28_ENVIRONMENT,
-      company="CRONUS USA",
-      configuration_name=V28_CONFIGURATION,
+      environment=os.environ["BC_ENVIRONMENT"],
+      company=os.environ["BC_COMPANY"],
+      configuration_name=os.environ.get("BC_CONFIGURATION_NAME") or None,
   )
 
   token = await create_token_provider(config).get_token()
@@ -76,8 +77,8 @@ async def main() -> None:
   }
 
   print(f"endpoint     : {V28_URL}")
-  print(f"environment  : {V28_ENVIRONMENT}")
-  print(f"configuration: {V28_CONFIGURATION}\n")
+  print(f"environment  : {config.environment}")
+  print(f"configuration: {config.configuration_name}\n")
 
   async with httpx.AsyncClient(timeout=120.0) as client:
     # 1) initialize
