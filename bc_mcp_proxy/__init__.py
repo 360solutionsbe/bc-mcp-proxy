@@ -9,6 +9,6 @@ from .config import ProxyConfig  # noqa: F401
 from .proxy import run_proxy  # noqa: F401
 
 __all__ = ["ProxyConfig", "run_proxy", "__version__"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 

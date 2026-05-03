@@ -3,15 +3,18 @@ requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bc-mcp-proxy"
-version = "0.1.2"
-description = "Python-based MCP stdio proxy for Microsoft Dynamics 365 Business Central"
+name = "vangelder-bc-mcp-proxy"
+version = "0.2.0"
+description = "Resilient MCP stdio proxy for Microsoft Dynamics 365 Business Central — fork of microsoft/BCTech BcMCPProxyPython with reconnect, silent token refresh, and surfaced upstream errors."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-  { name = "Microsoft" }
+  { name = "Stephane Vangelder", email = "stephane@vangeldersolutions.be" }
+]
+maintainers = [
+  { name = "Vangelder Solutions", email = "stephane@vangeldersolutions.be" }
 ]
 keywords = [
   "business-central",
@@ -22,12 +25,13 @@ keywords = [
   "agent"
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: OS Independent",
   "Topic :: Software Development :: Libraries :: Application Frameworks"
 ]
@@ -50,9 +54,10 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [project.urls]
-Homepage = "https://github.com/microsoft/BCTech"
-Repository = "https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython"
-Issues = "https://github.com/microsoft/BCTech/issues"
+Homepage = "https://github.com/vangelderSolutions/bc-mcp-proxy"
+Repository = "https://github.com/vangelderSolutions/bc-mcp-proxy"
+Issues = "https://github.com/vangelderSolutions/bc-mcp-proxy/issues"
+Upstream = "https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython"
 
 
 [project.scripts]
