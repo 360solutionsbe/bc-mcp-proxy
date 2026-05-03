@@ -1,7 +1,7 @@
 """Manual test — walk the Dynamic MCP cycle: search -> describe -> invoke.
 
 Goal: get the top 5 customers via the dynamic tooling pattern (the same
-data the static `My MCP Configuration` config exposed as `ListCustomers_PAG30009`).
+data a static MCP configuration would expose as `ListCustomers_PAG30009`).
 
 Schema notes derived from `bc_actions_*` inputSchemas:
 - bc_actions_search   : {SearchText, SearchMode in {keyword, semantic},

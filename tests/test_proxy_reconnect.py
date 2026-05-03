@@ -238,10 +238,12 @@ async def test_holder_wait_active_blocks_until_set() -> None:
     await asyncio.sleep(0.01)
     state.set_session(marker, lambda: "s")  # type: ignore[arg-type]
 
-  async with asyncio.TaskGroup() as tg:
-    tg.create_task(setter())
+  setter_task = asyncio.create_task(setter())
+  try:
     session = await asyncio.wait_for(state.wait_active(), timeout=1.0)
     assert session is marker
+  finally:
+    await setter_task
 
 
 async def test_holder_clear_makes_subsequent_waiters_block() -> None:
