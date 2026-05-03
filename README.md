@@ -1,4 +1,4 @@
-# vangelder-bc-mcp-proxy
+# 360Solutions-BC-MCP
 
 > **Fork of [microsoft/BCTech `samples/BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython)** — a resilient Python MCP stdio proxy that bridges Claude Desktop, VS Code, Cursor and other MCP-compatible clients to the Microsoft Dynamics 365 Business Central MCP HTTP endpoint.
 >
@@ -112,7 +112,7 @@ In Business Central, in your target environment:
 ### Step 3 — Install the proxy
 
 ```bash
-python -m pip install --upgrade vangelder-bc-mcp-proxy
+python -m pip install --upgrade 360solutions-bc-mcp
 ```
 
 Or from source:
@@ -272,7 +272,7 @@ Token cache locations (when no custom auth header is supplied):
 - **JSON-RPC `-32603 "An error occurred."` with no detail.** This is BC's catch-all when something inside a dynamic-tool call goes wrong. The actual reason is logged to Azure Application Insights as event `RT0054` with custom dimension `toolInvocationFailureReason`. Enable telemetry on the BC environment and query (`traces | where customDimensions.eventId == 'RT0054' | where customDimensions.toolInvocationResult == 'Failure'`) to see what BC actually rejected.
 - **Frequent reconnects in logs.** Inspect upstream availability — the proxy logs `Upstream connection error (...); reconnecting in Xs (attempt N/M)` whenever it retries. After the configured budget the proxy gives up and the local stdio pipe closes.
 - **Repeated sign-in prompts.** The MSAL token cache may not be writable. Pass `--DeviceCacheLocation` to point at a directory you control.
-- **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade vangelder-bc-mcp-proxy`).
+- **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade 360solutions-bc-mcp`).
 
 ---
 
@@ -344,7 +344,7 @@ One appointment (online or on-site), configuration done, MCP working in your pro
 
 ## Sources
 
-- [`vangelder-bc-mcp-proxy` on GitHub](https://github.com/360solutionsbe/bc-mcp-proxy) — this fork, MIT-licensed, maintained by 360 Solutions
+- [`360solutions-bc-mcp` on GitHub](https://github.com/360solutionsbe/bc-mcp-proxy) — this fork, MIT-licensed, maintained by 360 Solutions
 - [`microsoft/BCTech BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython) — Microsoft's reference implementation
 - [Configure Business Central MCP Server](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/ai/configure-mcp-server) — Microsoft Learn
 - [Analyze MCP Server Tool Calls Telemetry](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/telemetry-mcp-server-trace) — RT0054 event reference

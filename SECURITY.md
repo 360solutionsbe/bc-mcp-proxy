@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in `vangelder-bc-mcp-proxy`, please report it privately so we can fix it before it is publicly disclosed.
+If you discover a security vulnerability in `360Solutions-BC-MCP`, please report it privately so we can fix it before it is publicly disclosed.
 
 **Email**: [dev@360solutions.be](mailto:dev@360solutions.be)
 
@@ -31,8 +31,8 @@ We support security fixes on the latest released minor version (`0.x`) on the `m
 
 | Version | Supported          |
 |---------|--------------------|
-| 0.3.x   | ✅                 |
-| < 0.3.0 | ❌ (please upgrade) |
+| 0.4.x   | ✅                 |
+| < 0.4.0 | ❌ (please upgrade) |
 
 ## Hall of fame
 
