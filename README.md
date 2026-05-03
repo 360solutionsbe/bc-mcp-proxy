@@ -2,7 +2,7 @@
 
 > **Fork of [microsoft/BCTech `samples/BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython)** — a resilient Python MCP stdio proxy that bridges Claude Desktop, VS Code, Cursor and other MCP-compatible clients to the Microsoft Dynamics 365 Business Central MCP HTTP endpoint.
 >
-> Original: Copyright (c) Microsoft Corporation. Modifications: Copyright (c) 2026 Vangelder Solutions. Licensed under the MIT License.
+> Built and maintained by **[360 Solutions](https://360solutions.be)** (a Vangelder Solutions brand). Original: Copyright (c) Microsoft Corporation. Modifications: Copyright (c) 2026 Vangelder Solutions. Licensed under the MIT License.
 
 > ⚠️ **Experimental.** Not for production use yet. The Business Central MCP endpoint itself is in preview and changes regularly. This fork is a working tool for development and evaluation, not a supported product.
 
@@ -118,7 +118,7 @@ python -m pip install --upgrade vangelder-bc-mcp-proxy
 Or from source:
 
 ```bash
-git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
+git clone https://github.com/360solutionsbe/bc-mcp-proxy.git
 cd bc-mcp-proxy
 python -m pip install -e .
 ```
@@ -316,7 +316,7 @@ The output (`dist/bc-mcp-proxy-<version>.dxt`) installs into Claude Desktop, pro
 ## Development
 
 ```bash
-git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
+git clone https://github.com/360solutionsbe/bc-mcp-proxy.git
 cd bc-mcp-proxy
 python -m pip install -e ".[test]"
 python -m pytest
@@ -326,7 +326,7 @@ python -m pytest
 
 ## Need help?
 
-The Azure App Registration and the right permissions take attention to detail. For customers who would rather not deal with `Manifest.json`, redirect URIs and delegated permissions themselves, **Vangelder Solutions** offers an **end-to-end MCP setup package**:
+The Azure App Registration and the right permissions take attention to detail. For customers who would rather not deal with `Manifest.json`, redirect URIs and delegated permissions themselves, **360 Solutions** offers an **end-to-end MCP setup package**:
 
 - Azure App Registration created and validated in your tenant
 - BC MCP Configuration created on the right environment(s)
@@ -336,15 +336,15 @@ The Azure App Registration and the right permissions take attention to detail. F
 
 One appointment (online or on-site), configuration done, MCP working in your production environment.
 
-📧 **stephane@vangeldersolutions.be**
-🌐 [www.vangeldersolutions.be](https://www.vangeldersolutions.be)
-📦 [github.com/VangelderSolutions/bc-mcp-proxy](https://github.com/VangelderSolutions/bc-mcp-proxy)
+📧 **dev@360solutions.be**
+🌐 [www.360solutions.be](https://www.360solutions.be)
+📦 [github.com/360solutionsbe/bc-mcp-proxy](https://github.com/360solutionsbe/bc-mcp-proxy)
 
 ---
 
 ## Sources
 
-- [`vangelder-bc-mcp-proxy` on GitHub](https://github.com/VangelderSolutions/bc-mcp-proxy) — this fork, MIT-licensed
+- [`vangelder-bc-mcp-proxy` on GitHub](https://github.com/360solutionsbe/bc-mcp-proxy) — this fork, MIT-licensed, maintained by 360 Solutions
 - [`microsoft/BCTech BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython) — Microsoft's reference implementation
 - [Configure Business Central MCP Server](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/ai/configure-mcp-server) — Microsoft Learn
 - [Analyze MCP Server Tool Calls Telemetry](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/telemetry-mcp-server-trace) — RT0054 event reference
