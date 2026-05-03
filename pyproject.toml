@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vangelder-bc-mcp-proxy"
-version = "0.2.0"
+version = "0.3.0"
 description = "Resilient MCP stdio proxy for Microsoft Dynamics 365 Business Central — fork of microsoft/BCTech BcMCPProxyPython with reconnect, silent token refresh, and surfaced upstream errors."
 readme = "README.md"
 requires-python = ">=3.10"
