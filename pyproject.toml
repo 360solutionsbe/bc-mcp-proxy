@@ -3,8 +3,8 @@ requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vangelder-bc-mcp-proxy"
-version = "0.3.0"
+name = "360solutions-bc-mcp"
+version = "0.4.0"
 description = "Resilient MCP stdio proxy for Microsoft Dynamics 365 Business Central — fork of microsoft/BCTech BcMCPProxyPython with reconnect, silent token refresh, and surfaced upstream errors."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -61,6 +61,8 @@ Upstream = "https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPy
 
 
 [project.scripts]
+360solutions-bc-mcp = "bc_mcp_proxy.__main__:main"
+# Legacy alias kept for drop-in compatibility with the upstream Microsoft sample.
 bc-mcp-proxy = "bc_mcp_proxy.__main__:main"
 
 [tool.setuptools.packages.find]
