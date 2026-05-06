@@ -17,6 +17,11 @@ permissions:
 jobs:
   analyze:
     name: Analyze Python
+    # CodeQL upload requires GitHub Advanced Security on private repos (paid).
+    # On public repos it's free and just works. Skip on private to avoid the
+    # "Advanced Security must be enabled" error; the job auto-runs once the
+    # repo is flipped to public.
+    if: ${{ github.event.repository.visibility == 'public' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
