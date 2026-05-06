@@ -1,0 +1,57 @@
+# Contributing to 360Solutions-BC-MCP
+
+Thanks for your interest. The proxy is small and the contribution loop is simple.
+
+## Quick start
+
+```bash
+git clone https://github.com/360solutionsbe/bc-mcp-proxy.git
+cd bc-mcp-proxy
+python -m pip install -e ".[test]"
+python -m pytest
+```
+
+## Project layout
+
+| Path | Purpose |
+|---|---|
+| `bc_mcp_proxy/` | The proxy package itself. |
+| `bc_mcp_proxy/proxy.py` | Upstream connection manager, reconnect/backoff, in-memory tools cache. |
+| `bc_mcp_proxy/tools_cache.py` | Persistent on-disk tools/list cache. |
+| `bc_mcp_proxy/config.py` | `ProxyConfig` dataclass, `validate_base_url`, scope auto-switch. |
+| `bc_mcp_proxy/__main__.py` | CLI entry point. |
+| `tests/` | Pytest suite. Run `python -m pytest` from the repo root. |
+| `dxt/` | Claude Desktop bundle build scripts and manifest. |
+| `scripts/` | Manual diagnostic scripts (`smoke_connect.py` etc.). |
+
+## Before submitting a PR
+
+- [ ] `python -m pytest` passes (no skipped suites, no warnings about your changes).
+- [ ] If you touched the upstream transport path or auth, run `python scripts/smoke_connect.py` against a real BC tenant. The script reads `.env` and exercises a real `tools/list` call.
+- [ ] If you touched the .dxt manifest or build script, rebuild via `pwsh dxt/build.ps1` (Windows) or `./dxt/build.sh` (macOS/Linux) and confirm the resulting bundle still installs cleanly in Claude Desktop.
+- [ ] Update `README.md`, `SECURITY.md`, and `.env.example` if user-visible behaviour changed.
+- [ ] Bump `__version__` in `bc_mcp_proxy/__init__.py`, `pyproject.toml`, and `dxt/manifest.json` *together* — they must always match.
+
+## Commit style
+
+Conventional Commits (`feat:`, `fix:`, `chore:`, `ci:`, `docs:`, `release:`). One-line subject in imperative mood, body explaining the *why* not the *what*. The git log is part of the project documentation, not a stream-of-consciousness.
+
+## Security issues
+
+Please **don't** open a public issue for vulnerabilities. See [SECURITY.md](SECURITY.md) for the responsible disclosure channel.
+
+## Help with Azure / BC setup
+
+The proxy install is the easy part. Azure App Registration and BC MCP Configuration are the parts most users actually need help with. If your "issue" is really a setup question, save yourself the round-trip and contact us at [dev@360solutions.be](mailto:dev@360solutions.be) — that's a paid setup service we offer, and it's much faster than us debugging your tenant via GitHub comments.
+
+## Questions vs. issues
+
+| Use **Discussions** for | Use **Issues** for |
+|---|---|
+| "How do I do X" | A reproducible bug |
+| Suggesting an enhancement to chew on | A concrete feature request you want tracked |
+| Sharing a deployment story | Anything you'd want a reviewer to act on |
+
+## Code of Conduct
+
+By participating, you agree to abide by the [Contributor Covenant 2.1](.github/CODE_OF_CONDUCT.md).

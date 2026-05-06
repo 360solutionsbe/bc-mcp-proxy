@@ -1,0 +1,113 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Filling in the fields
+        below makes it much faster to triage and reproduce. If you're
+        sharing logs, please redact tenant IDs and bearer tokens.
+
+  - type: input
+    id: proxy_version
+    attributes:
+      label: Proxy version
+      description: The `__version__` from `bc_mcp_proxy/__init__.py`, or the .dxt filename version.
+      placeholder: "0.5.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: How was the proxy installed?
+      options:
+        - Claude Desktop .dxt extension (download from Releases)
+        - Claude Desktop .dxt extension (built locally with dxt/build.ps1 or build.sh)
+        - python -m bc_mcp_proxy via Claude Desktop's claude_desktop_config.json
+        - python -m bc_mcp_proxy via VS Code / Cursor MCP config
+        - Other (please describe in "Additional context")
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bc_version
+    attributes:
+      label: Business Central version
+      options:
+        - "v28+ (mcp.businesscentral.dynamics.com)"
+        - "v26 / v27 (api.businesscentral.dynamics.com/v2.0/.../mcp)"
+        - "Don't know"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tool_mode
+    attributes:
+      label: BC MCP tool mode
+      description: Static = one tool per page. Dynamic = three meta-tools (`bc_actions_search`, `_describe`, `_invoke`).
+      options:
+        - Static
+        - Dynamic
+        - Don't know
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 24H2 / macOS 15.1 / Ubuntu 22.04"
+    validations:
+      required: true
+
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      description: Output of `python --version` or `python3 --version` in the shell where the proxy runs.
+      placeholder: "Python 3.10.11"
+    validations:
+      required: false
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps a maintainer can run to see the same failure.
+      placeholder: |
+        1. Install the .dxt
+        2. Restart Claude Desktop
+        3. Ask "list all customers"
+        4. See ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        Paste from `%APPDATA%\Claude\Logs\mcp-server-Business Central MCP Proxy.log` (Windows)
+        or `~/Library/Logs/Claude/mcp-server-Business Central MCP Proxy.log` (macOS).
+        Redact tenant IDs and bearer tokens before pasting.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that might help.
+    validations:
+      required: false

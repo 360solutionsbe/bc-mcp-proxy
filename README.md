@@ -1,6 +1,9 @@
 # 360Solutions-BC-MCP
 
+[![CI](https://github.com/360solutionsbe/bc-mcp-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/360solutionsbe/bc-mcp-proxy/actions/workflows/ci.yml)
+[![Snyk](https://github.com/360solutionsbe/bc-mcp-proxy/actions/workflows/snyk.yml/badge.svg)](https://github.com/360solutionsbe/bc-mcp-proxy/actions/workflows/snyk.yml)
 [![Known Vulnerabilities](https://snyk.io/test/github/360solutionsbe/bc-mcp-proxy/badge.svg)](https://snyk.io/test/github/360solutionsbe/bc-mcp-proxy)
+[![Latest Release](https://img.shields.io/github/v/release/360solutionsbe/bc-mcp-proxy?display_name=tag&sort=semver)](https://github.com/360solutionsbe/bc-mcp-proxy/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
