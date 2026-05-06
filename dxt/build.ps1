@@ -62,9 +62,10 @@ Write-Host "Vendoring Python dependencies into $buildDir/server ..."
     -r 'dxt/requirements.txt'
 if ($LASTEXITCODE -ne 0) { throw "pip install --target failed (exit $LASTEXITCODE)" }
 
-# Strip __pycache__ and dist-info that bloat the bundle without affecting runtime.
+# Strip only __pycache__. Do NOT strip *.dist-info — the mcp package
+# (and any other dep that calls importlib.metadata.version("<self>") at
+# import time) needs that metadata to be present in the bundle.
 Get-ChildItem -Path $buildDir -Recurse -Directory -Filter '__pycache__' | Remove-Item -Recurse -Force
-Get-ChildItem -Path "$buildDir/server" -Directory -Filter '*.dist-info' | Remove-Item -Recurse -Force
 
 Write-Host "Packing $bundle ..."
 # Anthropic renamed @anthropic-ai/dxt to @anthropic-ai/mcpb in late 2025.

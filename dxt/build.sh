@@ -79,9 +79,10 @@ python3 -m pip install \
   --platform "$pip_platform" \
   -r dxt/requirements.txt
 
-# Strip caches and dist-info metadata that bloat the bundle without affecting runtime.
+# Strip only __pycache__. Do NOT strip *.dist-info — the mcp package
+# (and any other dep that calls importlib.metadata.version("<self>") at
+# import time) needs that metadata to be present in the bundle.
 find "$build_dir" -type d -name __pycache__ -prune -exec rm -rf {} +
-find "$build_dir/server" -maxdepth 1 -type d -name '*.dist-info' -exec rm -rf {} +
 
 echo "Packing $bundle ..."
 if command -v mcpb >/dev/null 2>&1; then
