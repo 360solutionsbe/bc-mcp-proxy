@@ -87,8 +87,10 @@ python-multipart==0.0.26
     # via
     #   -r dxt/requirements.in
     #   mcp
-pywin32==311
-    # via mcp
+pywin32==311 ; sys_platform == "win32"
+    # via
+    #   -r dxt/requirements.in
+    #   mcp
 referencing==0.37.0
     # via
     #   jsonschema

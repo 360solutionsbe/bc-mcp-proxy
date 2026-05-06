@@ -20,6 +20,12 @@ msal>=1.34.0
 msal-extensions>=1.3.0
 exceptiongroup>=1.2.0; python_version < "3.11"
 
+# pywin32 is a Windows-only transitive of mcp. Listing it here with an
+# explicit sys_platform marker forces pip-compile to preserve the marker
+# in the generated lockfile — without it, CI on Ubuntu fails to install
+# the lockfile because pywin32 has no Linux wheels.
+pywin32; sys_platform == "win32"
+
 # --- Transitive security floors (Snyk-flagged CVEs) ---------------------------
 # These packages are pulled in by mcp / msal / httpx but ship vulnerable
 # versions in their unconstrained transitive trees. We constrain to the
