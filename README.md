@@ -65,7 +65,7 @@ The proxy is the translator:
 | **BC environment** | Version 26.0 or later. Sandbox or production. The MCP feature is enabled by default from v26. |
 | **Microsoft Entra (Azure AD) tenant** | With **administrator** rights — you'll create an App Registration and grant API permissions. |
 | **An AI client** | Claude Desktop (free), VS Code with MCP support, Cursor, or any other stdio-MCP capable tool. |
-| **Python 3.10+** on your machine | Required even when installing the `.dxt` extension — Claude Desktop launches the proxy with the system Python and currently does not auto-install the bundle's dependencies. See [Claude Desktop Extension](#claude-desktop-extension) for the deps install command. |
+| **Python 3.10+** on your machine | Claude Desktop launches the proxy with the system `python3`. The DXT bundle vendors all Python dependencies internally (Windows `cp310-win_amd64` wheels), so no separate `pip install` is required. |
 
 ---
 
@@ -316,15 +316,18 @@ pwsh dxt/build.ps1     # Windows
 ./dxt/build.sh         # macOS / Linux
 ```
 
-The output (`dist/bc-mcp-proxy-<version>.dxt`) installs into Claude Desktop, prompts for tenant ID / client ID / environment / company / configuration name, and runs the same proxy as the CLI version.
+The output (`dist/bc-mcp-proxy-<version>-<platform>.dxt`) installs into Claude Desktop, prompts for tenant ID / client ID / environment / company / configuration name, and runs the same proxy as the CLI version.
 
-**One install-time requirement** the bundle does not yet handle: Claude Desktop launches the proxy with whichever Python the system resolves as `python3` and does NOT pip-install the bundled `requirements.txt`. Before the first run, install the proxy's dependencies into that Python:
+**Self-contained bundle.** The build script vendors all Python dependencies (`mcp`, `httpx`, `msal`, plus the security-floor pins) into the bundle as Python-3.10 wheels matching the host platform. Claude Desktop launches the proxy with the system `python3` and the bundled deps take precedence over anything in the system's site-packages, so no separate `pip install` is required on the install side. Each platform has its own bundle:
 
-```bash
-python3 -m pip install --user -r dxt/requirements.txt
-```
+| Platform | Filename pattern |
+|---|---|
+| Windows 64-bit | `bc-mcp-proxy-<version>-win-amd64.dxt` |
+| macOS Apple Silicon | `bc-mcp-proxy-<version>-darwin-arm64.dxt` |
+| macOS Intel | `bc-mcp-proxy-<version>-darwin-x86_64.dxt` |
+| Linux x86_64 | `bc-mcp-proxy-<version>-linux-x86_64.dxt` |
 
-If `python3` is not on your PATH on Windows, ensure Python 3.10+ is installed (the official python.org installer or via `winget install Python.Python.3.12`). Vendoring the dependencies inside the bundle is on the roadmap so this step disappears for prospects.
+Build on each target platform's host (a Windows machine for the Windows bundle, etc.), or in a CI matrix.
 
 ---
 
