@@ -31,8 +31,9 @@ Pre-built `.dxt` bundles are published on each release with all Python dependenc
    |---|---|
    | Windows 64-bit | `bc-mcp-proxy-<version>-win-amd64.dxt` |
    | macOS Apple Silicon | `bc-mcp-proxy-<version>-darwin-arm64.dxt` |
-   | macOS Intel | `bc-mcp-proxy-<version>-darwin-x86_64.dxt` |
    | Linux x86_64 | `bc-mcp-proxy-<version>-linux-x86_64.dxt` |
+
+   *Intel macOS (`x86_64`) is not shipped as a pre-built asset — Apple Silicon has been the default since 2020 and the audience for Intel-only Macs is vanishing. Intel Mac users can build from source via `./dxt/build.sh` (any Mac with Python 3.10+).*
 
 2. **Double-click** the downloaded file. Claude Desktop opens an install dialog.
 3. **Fill in** Tenant ID, Client ID, Environment, Company, (optional) Configuration Name. The defaults already point at the BC v28 endpoint; override via the *Business Central MCP endpoint* field for v26/v27.
@@ -348,10 +349,9 @@ The output (`dist/bc-mcp-proxy-<version>-<platform>.dxt`) installs into Claude D
 |---|---|
 | Windows 64-bit | `bc-mcp-proxy-<version>-win-amd64.dxt` |
 | macOS Apple Silicon | `bc-mcp-proxy-<version>-darwin-arm64.dxt` |
-| macOS Intel | `bc-mcp-proxy-<version>-darwin-x86_64.dxt` |
 | Linux x86_64 | `bc-mcp-proxy-<version>-linux-x86_64.dxt` |
 
-Build on each target platform's host (a Windows machine for the Windows bundle, etc.), or in a CI matrix.
+Pre-built bundles for these three platforms are attached to every GitHub Release. Intel macOS (`darwin-x86_64`) isn't in the official matrix; Intel Mac users can run `./dxt/build.sh` on their own machine to produce a matching bundle. Building on each target platform's host (a Windows machine for the Windows bundle, etc.) is what the release CI does — wheels for `cryptography` are platform-specific.
 
 ---
 
