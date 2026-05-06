@@ -11,7 +11,9 @@
 >
 > Built and maintained by **[360 Solutions](https://360solutions.be)** (a Vangelder Solutions brand). Original: Copyright (c) Microsoft Corporation. Modifications: Copyright (c) 2026 Vangelder Solutions. Licensed under the MIT License.
 
-> ⚠️ **Experimental.** Not for production use yet. The Business Central MCP endpoint itself is in preview and changes regularly. This fork is a working tool for development and evaluation, not a supported product.
+> ✅ **BC v28+ (May 2026): generally available.** Microsoft's Business Central MCP server is officially supported from version 28 onward, and this proxy targets it by default. The v26/v27 endpoint that preceded it was a preview and is still supported here for environments that haven't upgraded — expect occasional breaking changes from Microsoft on that path until everyone is on v28.
+>
+> The proxy itself is MIT-licensed open source, actively maintained, with a 95-test suite and Snyk-monitored dependencies. Suitable for development, evaluation, and pilot deployments. Production fitness is your organisation's call — see [Security](#security) for the threat model.
 
 ---
 
