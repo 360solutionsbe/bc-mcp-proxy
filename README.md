@@ -65,7 +65,7 @@ The proxy is the translator:
 | **BC environment** | Version 26.0 or later. Sandbox or production. The MCP feature is enabled by default from v26. |
 | **Microsoft Entra (Azure AD) tenant** | With **administrator** rights — you'll create an App Registration and grant API permissions. |
 | **An AI client** | Claude Desktop (free), VS Code with MCP support, Cursor, or any other stdio-MCP capable tool. |
-| **Python 3.10+** on your machine | Or use the Claude Desktop Extension (`.dxt`) bundle once published. |
+| **Python 3.10+** on your machine | Required even when installing the `.dxt` extension — Claude Desktop launches the proxy with the system Python and currently does not auto-install the bundle's dependencies. See [Claude Desktop Extension](#claude-desktop-extension) for the deps install command. |
 
 ---
 
@@ -317,6 +317,14 @@ pwsh dxt/build.ps1     # Windows
 ```
 
 The output (`dist/bc-mcp-proxy-<version>.dxt`) installs into Claude Desktop, prompts for tenant ID / client ID / environment / company / configuration name, and runs the same proxy as the CLI version.
+
+**One install-time requirement** the bundle does not yet handle: Claude Desktop launches the proxy with whichever Python the system resolves as `python3` and does NOT pip-install the bundled `requirements.txt`. Before the first run, install the proxy's dependencies into that Python:
+
+```bash
+python3 -m pip install --user -r dxt/requirements.txt
+```
+
+If `python3` is not on your PATH on Windows, ensure Python 3.10+ is installed (the official python.org installer or via `winget install Python.Python.3.12`). Vendoring the dependencies inside the bundle is on the roadmap so this step disappears for prospects.
 
 ---
 
