@@ -42,15 +42,16 @@ dependencies = [
   "msal-extensions>=1.3.0",
   "exceptiongroup>=1.2.0; python_version < '3.11'",
   # Security pins for transitive dependencies (Snyk-flagged CVEs).
-  # See dxt/requirements.txt for the per-pin Snyk advisory IDs.
-  "h11>=0.16.0",
-  "cryptography>=46.0.6",
-  "pyjwt>=2.12.0",
-  "python-dotenv>=1.2.2",
-  "python-multipart>=0.0.26",
-  "requests>=2.33.0",
-  "starlette>=0.49.1",
-  "urllib3>=2.6.3"
+  # See dxt/requirements.txt for the per-pin Snyk advisory IDs and
+  # the rationale for exact (==) pins instead of >=.
+  "h11==0.16.0",
+  "cryptography==46.0.6",
+  "pyjwt==2.12.0",
+  "python-dotenv==1.2.2",
+  "python-multipart==0.0.26",
+  "requests==2.33.0",
+  "starlette==0.49.1",
+  "urllib3==2.6.3"
 ]
 
 [project.optional-dependencies]
