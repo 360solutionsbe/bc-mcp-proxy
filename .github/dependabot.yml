@@ -1,8 +1,12 @@
 version: 2
 updates:
-  # Python runtime + test dependencies declared in pyproject.toml.
+  # Python deps from pyproject.toml + dxt/requirements.txt.
+  # `directories` (plural, v2) lets one entry watch both. Groups bundle
+  # related packages into a single weekly PR — one merge instead of N.
   - package-ecosystem: "pip"
-    directory: "/"
+    directories:
+      - "/"
+      - "/dxt"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -16,11 +20,25 @@ updates:
       mcp-stack:
         patterns:
           - "mcp"
-          - "httpx"
+          - "httpx*"
           - "anyio"
       msal-stack:
         patterns:
           - "msal*"
+      security-pins:
+        # Transitive packages we explicitly == in dxt/requirements.txt
+        # to force Snyk's GitHub-integrated static resolver to land on
+        # patched versions. New CVEs in any of these should ship as one
+        # weekly PR rather than eight separate ones.
+        patterns:
+          - "h11"
+          - "cryptography"
+          - "pyjwt"
+          - "python-dotenv"
+          - "python-multipart"
+          - "requests"
+          - "starlette"
+          - "urllib3"
       test-stack:
         patterns:
           - "pytest*"
@@ -37,3 +55,7 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    groups:
+      actions:
+        patterns:
+          - "*"

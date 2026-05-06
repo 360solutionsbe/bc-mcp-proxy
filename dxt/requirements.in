@@ -1,0 +1,34 @@
+# Source-of-truth dependency declarations for the DXT bundle.
+#
+# This file is hand-edited. The fully-pinned lockfile (dxt/requirements.txt)
+# is generated from this file by pip-compile:
+#
+#     python -m piptools compile dxt/requirements.in --strip-extras --resolver=backtracking -o dxt/requirements.txt
+#
+# Or via the convenience script:
+#
+#     python scripts/compile_requirements.py
+#
+# The lockfile is what Snyk scans (and what the build script vendors into
+# the .dxt). Pinning every transitive eliminates the discrepancy between
+# Snyk's static resolver and pip's install-time resolver.
+
+# --- Direct runtime dependencies ----------------------------------------------
+mcp>=1.21.0
+httpx>=0.28.0
+msal>=1.34.0
+msal-extensions>=1.3.0
+exceptiongroup>=1.2.0; python_version < "3.11"
+
+# --- Transitive security floors (Snyk-flagged CVEs) ---------------------------
+# These packages are pulled in by mcp / msal / httpx but ship vulnerable
+# versions in their unconstrained transitive trees. We constrain to the
+# patched floors here so pip-compile's resolution lands above them.
+h11>=0.16.0                  # SNYK-PYTHON-H11-10293728: HTTP Request Smuggling
+cryptography>=46.0.7         # SNYK-PYTHON-CRYPTOGRAPHY-* + CVE-2026-39892
+pyjwt>=2.12.0                # SNYK-PYTHON-PYJWT-15518059
+python-dotenv>=1.2.2         # SNYK-PYTHON-PYTHONDOTENV-16115271
+python-multipart>=0.0.26     # SNYK-PYTHON-PYTHONMULTIPART-*
+requests>=2.33.0             # SNYK-PYTHON-REQUESTS-*
+starlette>=0.49.1            # SNYK-PYTHON-STARLETTE-*
+urllib3>=2.6.3               # SNYK-PYTHON-URLLIB3-*
