@@ -13,7 +13,7 @@ exceptiongroup>=1.2.0; python_version < "3.11"
 # Exact pins force both pip and Snyk's resolver to land on the same
 # patched version.
 h11==0.16.0                  # SNYK-PYTHON-H11-10293728: HTTP Request Smuggling (Critical)
-cryptography==46.0.6         # SNYK-PYTHON-CRYPTOGRAPHY-15263096 / -15809188
+cryptography==46.0.7         # SNYK-PYTHON-CRYPTOGRAPHY-15263096 / -15809188 + CVE-2026-39892
 pyjwt==2.12.0                # SNYK-PYTHON-PYJWT-15518059
 python-dotenv==1.2.2         # SNYK-PYTHON-PYTHONDOTENV-16115271
 python-multipart==0.0.26     # SNYK-PYTHON-PYTHONMULTIPART-15117506 / -16078395

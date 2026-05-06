@@ -17,6 +17,10 @@ permissions:
 jobs:
   snyk-open-source:
     name: Open Source vulnerabilities
+    # GitHub doesn't expose secrets (incl. SNYK_TOKEN) to Dependabot-triggered
+    # PR workflows. The merge to main re-runs Snyk with the secret available,
+    # so skipping here avoids spurious "Authentication error" failures.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +52,7 @@ jobs:
 
   snyk-code:
     name: SAST (Snyk Code)
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
