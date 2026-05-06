@@ -6,7 +6,12 @@ import os
 import sys
 from typing import Optional
 
-from .config import ProxyConfig
+from .config import (
+    InvalidBaseUrlError,
+    ProxyConfig,
+    resolve_token_scope,
+    validate_base_url,
+)
 from .proxy import run_sync
 from .setup_flow import run_interactive_setup
 
@@ -41,6 +46,14 @@ def parse_args(argv: list[str] | None = None) -> ProxyConfig:
   defaults = ProxyConfig()
   env = _config_from_env()
 
+  base_url = _select("base_url", args.base_url, env, defaults.base_url)
+  # Resolve the OAuth scope from the effective base_url: explicit CLI/env
+  # override always wins; otherwise the v28 host gets the v28 scope and
+  # everything else gets the v26/v27 scope. Without this the v28 host
+  # silently fails auth when users set BC_BASE_URL but not BC_TOKEN_SCOPE.
+  token_scope_override = args.token_scope if args.token_scope is not None else env.get("token_scope")
+  token_scope = resolve_token_scope(base_url, token_scope_override)
+
   return ProxyConfig(
       tenant_id=_select("tenant_id", args.tenant_id, env, defaults.tenant_id),
       client_id=_select("client_id", args.client_id, env, defaults.client_id),
@@ -50,8 +63,8 @@ def parse_args(argv: list[str] | None = None) -> ProxyConfig:
           "configuration_name", args.configuration_name, env, defaults.configuration_name),
       custom_auth_header=_select(
           "custom_auth_header", args.custom_auth_header, env, defaults.custom_auth_header),
-      base_url=_select("base_url", args.base_url, env, defaults.base_url),
-      token_scope=_select("token_scope", args.token_scope, env, defaults.token_scope),
+      base_url=base_url,
+      token_scope=token_scope,
       server_name=_select("server_name", args.server_name, env, defaults.server_name),
       server_version=_select("server_version", args.server_version, env, defaults.server_version),
       instructions=_select("instructions", args.instructions, env, defaults.instructions),
@@ -78,6 +91,11 @@ def main(argv: list[str] | None = None) -> None:
 
   config = parse_args(argv)
   logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
+  try:
+    validate_base_url(config.base_url, allow_non_standard=_env_flag("BC_ALLOW_NON_STANDARD_BASE_URL"))
+  except InvalidBaseUrlError as exc:
+    sys.stderr.write(f"ERROR: {exc}\n")
+    sys.exit(2)
   run_sync(config)
 
 

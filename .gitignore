@@ -49,3 +49,9 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Security scan output (Snyk / pip-audit CLI may dump JSON/HTML reports here)
+snyk-result.*
+snyk_results*.json
+.snyk-test-output/
+pip-audit.*

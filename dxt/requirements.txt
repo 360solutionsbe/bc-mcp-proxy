@@ -3,3 +3,16 @@ httpx>=0.28.0
 msal>=1.34.0
 msal-extensions>=1.3.0
 exceptiongroup>=1.2.0; python_version < "3.11"
+
+# Security pins for transitive dependencies (Snyk-flagged CVEs).
+# These are NOT used directly by the proxy — they're pulled in by mcp,
+# msal, and httpx — but pinning here forces pip to resolve patched
+# versions when those upstream packages still allow vulnerable ones.
+h11>=0.16.0                  # SNYK-PYTHON-H11-10293728: HTTP Request Smuggling (Critical)
+cryptography>=46.0.6         # SNYK-PYTHON-CRYPTOGRAPHY-15263096 / -15809188
+pyjwt>=2.12.0                # SNYK-PYTHON-PYJWT-15518059
+python-dotenv>=1.2.2         # SNYK-PYTHON-PYTHONDOTENV-16115271
+python-multipart>=0.0.26     # SNYK-PYTHON-PYTHONMULTIPART-15117506 / -16078395
+requests>=2.33.0             # SNYK-PYTHON-REQUESTS-10305723 / -15763443
+starlette>=0.49.1            # SNYK-PYTHON-STARLETTE-13733964 / -10874054
+urllib3>=2.6.3               # SNYK-PYTHON-URLLIB3-14192442 / -14192443 / -14896210 / -10390193 / -10390194

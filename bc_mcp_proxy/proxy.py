@@ -2,18 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Awaitable, Callable, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 
 import httpx
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, Implementation
+from mcp.types import CallToolResult, Implementation, ListToolsResult
 
+import os
+
+from . import tools_cache
 from .auth import TokenProvider, create_token_provider
-from .config import ProxyConfig
+from .config import ProxyConfig, is_v28_endpoint, validate_base_url
+
+# Re-exported for backward compatibility — older callers (and the existing
+# v28 endpoint test suite) import _is_v28_endpoint from this module.
+_is_v28_endpoint = is_v28_endpoint
 
 try:
   # Python 3.11+
@@ -78,6 +86,24 @@ def _is_recoverable_upstream_error(exc: BaseException) -> bool:
   return all(isinstance(leaf, _RECOVERABLE_HTTPX_ERRORS) for leaf in leaves)
 
 
+def _exception_hints_at_client_cancel(exc: BaseException) -> bool:
+  """Heuristic: did this disconnect look like the client cancelled mid-call?
+
+  Claude Desktop's hardcoded 30s timeout fires `notifications/cancelled`,
+  the SSE GET stream drops, and the next reconnect attempt sees HTTP 4xx
+  because the session id is now invalid. Surfacing that link in logs
+  helps users understand the failure mode.
+  """
+  for leaf in _iter_leaf_exceptions(exc):
+    if isinstance(leaf, httpx.HTTPStatusError):
+      status = getattr(leaf.response, "status_code", None)
+      if status is not None and 400 <= status < 500:
+        return True
+    if isinstance(leaf, httpx.RemoteProtocolError):
+      return True
+  return False
+
+
 def _detect_masked_error(result: CallToolResult) -> Optional[str]:
   """If `result` claims success but its text content contains a known error
   pattern, return the offending text. Otherwise return None.
@@ -115,6 +141,36 @@ def _backoff_for_attempt(
   if zero_based_attempt < 0:
     return base
   return min(base * (2 ** zero_based_attempt), max_value)
+
+
+class _ToolsCache:
+  """In-memory tools/list cache shared between stdio handler and upstream
+  pre-warm. Reads are lock-free; writes use a lock so concurrent refreshers
+  can't interleave a partial state."""
+
+  def __init__(self, ttl_seconds: float) -> None:
+    self._ttl = ttl_seconds
+    self._result: Optional[ListToolsResult] = None
+    self._fetched_at: float = 0.0
+    self._lock = asyncio.Lock()
+
+  def get_fresh(self, now: Optional[float] = None) -> Optional[ListToolsResult]:
+    if self._result is None:
+      return None
+    if (now or time.monotonic()) - self._fetched_at > self._ttl:
+      return None
+    return self._result
+
+  def get_any(self) -> Optional[ListToolsResult]:
+    return self._result
+
+  def store(self, result: ListToolsResult, now: Optional[float] = None) -> None:
+    self._result = result
+    self._fetched_at = now if now is not None else time.monotonic()
+
+  @property
+  def lock(self) -> asyncio.Lock:
+    return self._lock
 
 
 class _UpstreamSessionHolder:
@@ -175,6 +231,7 @@ class _UpstreamConnectionManager:
       headers: dict[str, str],
       auth: httpx.Auth,
       logger: logging.Logger,
+      tools_cache_obj: Optional[_ToolsCache] = None,
       max_attempts: int = DEFAULT_RECONNECT_MAX_ATTEMPTS,
       base_backoff: float = DEFAULT_RECONNECT_BASE_BACKOFF,
       max_backoff: float = DEFAULT_RECONNECT_MAX_BACKOFF,
@@ -186,6 +243,7 @@ class _UpstreamConnectionManager:
     self.headers = headers
     self.auth = auth
     self.logger = logger
+    self.tools_cache_obj = tools_cache_obj
     self.max_attempts = max_attempts
     self.base_backoff = base_backoff
     self.max_backoff = max_backoff
@@ -204,6 +262,7 @@ class _UpstreamConnectionManager:
         if not _is_recoverable_upstream_error(exc):
           self.state.clear_session()
           raise
+        session_id = self.state.session_id()
         self.state.clear_session()
         self._attempt += 1
         if self._attempt >= self.max_attempts:
@@ -215,9 +274,18 @@ class _UpstreamConnectionManager:
         backoff = _backoff_for_attempt(
             self._attempt - 1, self.base_backoff, self.max_backoff,
         )
+        hint = (
+            " — possible client-side cancellation"
+            if _exception_hints_at_client_cancel(exc) else ""
+        )
         self.logger.warning(
-            "Upstream connection error (%s); reconnecting in %.1fs (attempt %d/%d)",
-            type(exc).__name__, backoff, self._attempt, self.max_attempts,
+            "Upstream connection error (%s); session=%s%s; reconnecting in %.1fs (attempt %d/%d)",
+            type(exc).__name__,
+            session_id or "<none>",
+            hint,
+            backoff,
+            self._attempt,
+            self.max_attempts,
         )
         await self.sleep(backoff)
 
@@ -243,6 +311,28 @@ class _UpstreamConnectionManager:
             "Connected to remote MCP server (protocol %s)",
             init_result.protocolVersion,
         )
+
+        # Pre-warm tools/list before exposing the session so the stdio
+        # handler can answer Claude's first request from cache instead of
+        # racing BC's cold-start. If pre-warm fails for any reason, fall
+        # back to the existing behaviour — set the session active and
+        # let the stdio handler hit upstream lazily.
+        if self.tools_cache_obj is not None:
+          try:
+            tools_result = await remote_session.list_tools()
+            self.tools_cache_obj.store(tools_result)
+            tools_cache.save_disk_cache(self.config, tools_result)
+            self.logger.info(
+                "Pre-warmed tools/list cache (%d tools)",
+                len(getattr(tools_result, "tools", []) or []),
+            )
+          except Exception as exc:
+            # Log but don't propagate — a warmed cache is best-effort.
+            self.logger.warning(
+                "tools/list pre-warm failed (%s); cache stays cold",
+                type(exc).__name__,
+            )
+
         self.state.set_session(remote_session, get_session_id)
         # Each successful init resets the retry budget; subsequent failures
         # start the backoff sequence over.
@@ -258,16 +348,40 @@ async def run_proxy(config: ProxyConfig) -> None:
   if config.enable_debug:
     logger.setLevel(logging.DEBUG)
 
+  # Defense-in-depth: re-validate the URL at the boundary just before it's
+  # handed to the HTTP client. __main__ also validates on startup, but
+  # callers that construct ProxyConfig directly (tests, embedders) need
+  # this guard too — and using the *returned* sanitized URL (rather than
+  # the original) is what lets Snyk's data-flow analysis recognize the
+  # sanitization.
+  sanitized_base_url = validate_base_url(
+      config.base_url,
+      allow_non_standard=_env_flag("BC_ALLOW_NON_STANDARD_BASE_URL"),
+  )
+
   token_provider = create_token_provider(config, logger=logger)
 
   headers = _build_transport_headers(config)
-  url = _build_endpoint_url(config)
+  url = _build_endpoint_url(config, base_url_override=sanitized_base_url)
 
   logger.info("Connecting to Business Central MCP endpoint at %s", url)
 
   auth = _AsyncBearerAuth(token_provider)
 
   state = _UpstreamSessionHolder()
+  cache = _ToolsCache(ttl_seconds=config.tools_cache_ttl_seconds)
+
+  # Prepopulate the in-memory cache from disk (if a previous run cached
+  # tools for this exact tenant/env/company/config). This is the only
+  # thing that lets a freshly-launched proxy answer Claude's first
+  # tools/list within Claude's 30s window when BC is mid-cold-start.
+  disk_cached = tools_cache.load_disk_cache(config)
+  if disk_cached is not None:
+    cache.store(disk_cached)
+    logger.info(
+        "Loaded tools/list from disk cache (%d tools)",
+        len(getattr(disk_cached, "tools", []) or []),
+    )
 
   instructions = config.instructions or (
       "Bridge MCP stdio clients to Microsoft Dynamics 365 Business Central."
@@ -281,9 +395,31 @@ async def run_proxy(config: ProxyConfig) -> None:
 
   @server.list_tools()
   async def _list_tools() -> Any:
+    fresh = cache.get_fresh()
+    if fresh is not None:
+      logger.debug("Serving tools/list from cache")
+      return fresh
+
+    stale = cache.get_any()
+    if stale is not None:
+      # We have something cached but it's beyond the TTL. Serve it now
+      # to keep the client unblocked, and refresh in the background.
+      logger.debug("Serving stale tools/list; refreshing in background")
+      asyncio.create_task(_refresh_tools_cache(state, cache, config, logger))
+      return stale
+
     session = await state.wait_active()
     logger.debug("Listing tools via remote MCP session %s", state.session_id() or "<pending>")
-    return await session.list_tools()
+    async with cache.lock:
+      # Re-check after acquiring the lock — the pre-warm or another
+      # waiter may have populated the cache while we were blocked.
+      fresh = cache.get_fresh()
+      if fresh is not None:
+        return fresh
+      result = await session.list_tools()
+      cache.store(result)
+      tools_cache.save_disk_cache(config, result)
+    return result
 
   @server.call_tool()
   async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
@@ -308,6 +444,7 @@ async def run_proxy(config: ProxyConfig) -> None:
       headers=headers,
       auth=auth,
       logger=logger,
+      tools_cache_obj=cache,
   )
 
   async with stdio_server() as (local_read, local_write):
@@ -327,14 +464,22 @@ async def run_proxy(config: ProxyConfig) -> None:
       task.result()  # re-raise upstream/server failures
 
 
-def _is_v28_endpoint(base_url: str) -> bool:
-  """Detect the v28+ Business Central MCP host.
-
-  v26/v27: api.businesscentral.dynamics.com/v2.0/{env}/mcp
-  v28+   : mcp.businesscentral.dynamics.com (env now flows through headers)
-  """
-  host = (urlparse(base_url).hostname or "").lower()
-  return host == "mcp.businesscentral.dynamics.com"
+async def _refresh_tools_cache(
+    state: _UpstreamSessionHolder,
+    cache: _ToolsCache,
+    config: ProxyConfig,
+    logger: logging.Logger,
+) -> None:
+  """Background refresh used when serving a stale cached entry."""
+  try:
+    session = await state.wait_active()
+    async with cache.lock:
+      result = await session.list_tools()
+      cache.store(result)
+      tools_cache.save_disk_cache(config, result)
+    logger.debug("Refreshed stale tools/list cache")
+  except Exception as exc:
+    logger.warning("Background tools/list refresh failed: %s", type(exc).__name__)
 
 
 def _build_transport_headers(config: ProxyConfig) -> dict[str, str]:
@@ -345,7 +490,7 @@ def _build_transport_headers(config: ProxyConfig) -> dict[str, str]:
     headers["Company"] = unquote(config.company)
   if config.configuration_name:
     headers["ConfigurationName"] = unquote(config.configuration_name)
-  if _is_v28_endpoint(config.base_url):
+  if is_v28_endpoint(config.base_url):
     # The v28 host requires routing info in headers because the URL no
     # longer carries the environment in its path.
     if config.tenant_id:
@@ -355,9 +500,18 @@ def _build_transport_headers(config: ProxyConfig) -> dict[str, str]:
   return headers
 
 
-def _build_endpoint_url(config: ProxyConfig) -> str:
-  base = config.base_url.rstrip("/")
-  if _is_v28_endpoint(base):
+def _build_endpoint_url(config: ProxyConfig, base_url_override: Optional[str] = None) -> str:
+  # base_url_override carries a value that has been through validate_base_url();
+  # use it whenever provided so the URL flowing into the HTTP client can be
+  # traced back to the sanitizer. When called directly (e.g. by tests), fall
+  # back to validating config.base_url ourselves so there is no path that
+  # forwards an unvalidated URL into the network layer.
+  if base_url_override is not None:
+    base = base_url_override
+  else:
+    base = validate_base_url(config.base_url, allow_non_standard=True)
+  base = base.rstrip("/")
+  if is_v28_endpoint(base):
     # v28 host expects the bare URL — no /v2.0/{env}/mcp path.
     return base
   return f"{base}/v2.0/{config.environment}/mcp"
@@ -366,3 +520,10 @@ def _build_endpoint_url(config: ProxyConfig) -> str:
 def run_sync(config: ProxyConfig) -> None:
   """Helper to run the proxy from synchronous entry points."""
   asyncio.run(run_proxy(config))
+
+
+def _env_flag(name: str) -> bool:
+  value = os.getenv(name)
+  if value is None:
+    return False
+  return value.strip().lower() in {"1", "true", "yes", "on"}

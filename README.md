@@ -1,5 +1,9 @@
 # 360Solutions-BC-MCP
 
+[![Known Vulnerabilities](https://snyk.io/test/github/360solutionsbe/bc-mcp-proxy/badge.svg)](https://snyk.io/test/github/360solutionsbe/bc-mcp-proxy)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+
 > **Fork of [microsoft/BCTech `samples/BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython)** — a resilient Python MCP stdio proxy that bridges Claude Desktop, VS Code, Cursor and other MCP-compatible clients to the Microsoft Dynamics 365 Business Central MCP HTTP endpoint.
 >
 > Built and maintained by **[360 Solutions](https://360solutions.be)** (a Vangelder Solutions brand). Original: Copyright (c) Microsoft Corporation. Modifications: Copyright (c) 2026 Vangelder Solutions. Licensed under the MIT License.
@@ -20,7 +24,10 @@
 - ✅ **Pre-emptive MSAL silent token refresh.** Each acquired access token's expiry is tracked locally; when remaining validity drops below `token_refresh_skew_seconds` (default 300) the next call asks MSAL to mint a new token via `acquire_token_silent(force_refresh=True)` instead of letting Business Central reject the stale one with `Authentication_InvalidCredentials`.
 - ✅ **Surface masked upstream errors.** Some Business Central MCP responses ship with `isError: false` but the content is actually an error message ("Semantic search is not enabled", "Authentication_InvalidCredentials", etc.). The proxy now flags those as real MCP errors so the client sees them.
 - ✅ **BC v28 endpoint support.** Auto-detects `mcp.businesscentral.dynamics.com` and switches to the new header-based routing (TenantId + EnvironmentName headers) while keeping v26/v27 behaviour intact.
-- ✅ **Pytest test suite.** 45 tests cover error classification, backoff progression, the give-up path, the attempt-counter reset after a successful connect, MSAL refresh-skew boundaries, masked-error pattern matching, and v28 endpoint detection.
+- ✅ **Cold-start mitigation.** Three-tier `tools/list` cache (disk → in-memory pre-warm → upstream) masks BC's 30s+ first-call latency that otherwise trips Claude Desktop's hardcoded MCP request timeout. See [Cold-start mitigation](#cold-start-mitigation).
+- ✅ **SSRF hardening.** `BC_BASE_URL` is validated at startup: scheme must be `https`, host must be `*.businesscentral.dynamics.com`. Override via `BC_ALLOW_NON_STANDARD_BASE_URL=1` for local mock testing.
+- ✅ **Pinned transitive dependencies.** Explicit security floors for `h11`, `cryptography`, `pyjwt`, `python-multipart`, `starlette`, `urllib3`, `requests`, `python-dotenv` — eliminates 16 CVE paths Snyk flagged in the upstream `mcp`/`msal`/`httpx` transitive trees. See [SECURITY.md](SECURITY.md).
+- ✅ **Pytest test suite.** 95 tests cover error classification, backoff progression, MSAL refresh-skew boundaries, masked-error pattern matching, v28 endpoint detection, OAuth scope auto-switch, the persistent tools cache, and `base_url` validation.
 
 The CLI surface is unchanged — every flag and env var from the upstream sample still works.
 
@@ -141,13 +148,13 @@ BC_COMPANY=CRONUS USA
 BC_CONFIGURATION_NAME=Default MCP
 ```
 
-**For BC v28 or later** add:
+**For BC v26 or v27** add:
 
 ```ini
-BC_BASE_URL=https://mcp.businesscentral.dynamics.com
+BC_BASE_URL=https://api.businesscentral.dynamics.com
 ```
 
-(For v26/v27 omit `BC_BASE_URL` — the default `api.businesscentral.dynamics.com` is correct.)
+(BC v28 is now the default — Microsoft's documented endpoint for non-Microsoft MCP clients. The proxy auto-switches both the OAuth scope and the request headers to match.)
 
 ### Step 5 — Wire it into your AI client
 
@@ -228,14 +235,24 @@ Our recommendation: start with **static mode** for the first test (fast feedback
 
 ## BC version compatibility
 
-Microsoft changed the MCP endpoint shape in BC v28. The proxy detects the host you point it at and adapts:
+Microsoft changed the MCP endpoint shape in BC v28, and now documents only the v28 host for non-Microsoft MCP clients. The proxy detects the host you point it at and adapts everything — URL shape, request headers, **and OAuth scope** — automatically:
 
-| BC version | `BC_BASE_URL`                                  | URL shape                             | Routing info                                  |
-|------------|-----------------------------------------------|---------------------------------------|-----------------------------------------------|
-| 26 / 27    | `https://api.businesscentral.dynamics.com`    | `/v2.0/{environment}/mcp` is appended | `Company`, `ConfigurationName` headers        |
-| 28+        | `https://mcp.businesscentral.dynamics.com`    | bare host, no path                    | Adds `TenantId` and `EnvironmentName` headers |
+| BC version | `BC_BASE_URL`                                  | URL shape                             | Routing info                                  | OAuth scope                                                 |
+|------------|------------------------------------------------|---------------------------------------|-----------------------------------------------|--------------------------------------------------------------|
+| 28+ (default) | `https://mcp.businesscentral.dynamics.com`    | bare host, no path                    | `TenantId` + `EnvironmentName` headers (plus `Company`, `ConfigurationName`) | `https://mcp.businesscentral.dynamics.com/.default`         |
+| 26 / 27    | `https://api.businesscentral.dynamics.com`     | `/v2.0/{environment}/mcp` is appended | `Company`, `ConfigurationName` headers        | `https://api.businesscentral.dynamics.com/.default`         |
 
-Switching is a single-line change in `.env` or `--BaseUrl`; everything else stays identical.
+Switching versions is a single-line change in `.env` or `--BaseUrl` — the scope and headers follow automatically. Set `BC_TOKEN_SCOPE` only if you need to override the auto-pick.
+
+### Cold-start mitigation
+
+BC's MCP endpoint can take 30s+ to answer the very first `tools/list` call after the environment has been idle, which is longer than Claude Desktop's hardcoded MCP request timeout. The proxy masks this with a three-tier cache:
+
+1. On startup, load the previously cached tools list from disk (per tenant/environment/company/configuration).
+2. After the upstream session connects, eagerly pre-warm `tools/list` and refresh both the in-memory and disk caches.
+3. The stdio handler answers from the in-memory cache (5-minute TTL) instead of round-tripping to BC on every call.
+
+The very first install on a freshly cold-started BC environment may still hit the 30s timeout once — there is no disk cache yet to fall back on. Every subsequent launch is instant.
 
 ---
 
@@ -249,8 +266,8 @@ Switching is a single-line change in `.env` or `--BaseUrl`; everything else stay
 | Company             | `--Company`            | `BC_COMPANY`             | *required*                                                    |
 | Configuration Name  | `--ConfigurationName`  | `BC_CONFIGURATION_NAME`  | unset                                                         |
 | Custom Auth Header  | `--CustomAuthHeader`   | `BC_CUSTOM_AUTH_HEADER`  | unset (skips device flow when provided)                       |
-| Base URL            | `--BaseUrl`            | `BC_BASE_URL`            | `https://api.businesscentral.dynamics.com`                    |
-| Token Scope         | `--TokenScope`         | `BC_TOKEN_SCOPE`         | `https://api.businesscentral.dynamics.com/.default`           |
+| Base URL            | `--BaseUrl`            | `BC_BASE_URL`            | `https://mcp.businesscentral.dynamics.com` (v28)              |
+| Token Scope         | `--TokenScope`         | `BC_TOKEN_SCOPE`         | auto-picked from base URL host (v28 → v28 scope, v27 → v27 scope) |
 | HTTP Timeout (s)    | `--HttpTimeoutSeconds` | `BC_HTTP_TIMEOUT_SECONDS`| `120.0`                                                       |
 | SSE Timeout (s)     | `--SseTimeoutSeconds`  | `BC_SSE_TIMEOUT_SECONDS` | `300.0`                                                       |
 | Log Level           | `--LogLevel`           | `BC_LOG_LEVEL`           | `INFO`                                                        |

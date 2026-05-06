@@ -1,0 +1,67 @@
+name: Snyk
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Re-scan weekly so newly disclosed CVEs against pinned versions surface
+    # without waiting for the next code change.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snyk-open-source:
+    name: Open Source vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + transitive security pins
+        # Snyk resolves Python deps against the active environment, so the
+        # actual installed versions need to match the security pins from
+        # pyproject.toml / dxt/requirements.txt before we scan.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install -r dxt/requirements.txt
+
+      - uses: snyk/actions/setup@master
+
+      - name: snyk test (deps)
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          snyk test \
+            --all-projects \
+            --severity-threshold=high \
+            --org=7beb41cf-452b-47a4-8629-a9f853115213
+
+  snyk-code:
+    name: SAST (Snyk Code)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: snyk/actions/setup@master
+
+      - name: snyk code test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        # severity-threshold=high is intentional: the proxy ships with a few
+        # documented LOW/MEDIUM SAST findings whose rationale lives in
+        # SECURITY.md (env-var-driven cache dir + validated SSRF). New HIGHs
+        # should always fail the build.
+        run: |
+          snyk code test \
+            --severity-threshold=high \
+            --org=7beb41cf-452b-47a4-8629-a9f853115213

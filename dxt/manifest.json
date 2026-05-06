@@ -2,7 +2,7 @@
   "dxt_version": "0.1",
   "name": "360solutions-bc-mcp",
   "display_name": "Business Central MCP Proxy",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Bridge Claude Desktop to a Microsoft Dynamics 365 Business Central environment via the official BC MCP endpoint.",
   "long_description": "Resilient stdio MCP proxy that forwards tool calls from Claude Desktop to the Business Central MCP HTTP endpoint. Forked from microsoft/BCTech samples/BcMCPProxyPython with production fixes: reconnect on transient httpx errors with exponential backoff, pre-emptive MSAL silent token refresh, surfacing of upstream errors that arrive masked as successful responses, and BC v28 endpoint support. Maintained by 360 Solutions (a Vangelder Solutions brand). Tenant ID, client ID, environment, company and configuration name are configured at install time via the prompts below.",
   "author": {
@@ -37,7 +37,7 @@
     "type": "python",
     "entry_point": "server/bc_mcp_proxy/__main__.py",
     "mcp_config": {
-      "command": "python",
+      "command": "python3",
       "args": [
         "-m",
         "bc_mcp_proxy",
@@ -53,7 +53,13 @@
       "env": {
         "PYTHONPATH": "${__dirname}/server",
         "BC_CONFIGURATION_NAME": "${user_config.configuration_name}",
-        "BC_LOG_LEVEL": "${user_config.log_level}"
+        "BC_LOG_LEVEL": "${user_config.log_level}",
+        "BC_BASE_URL": "${user_config.base_url}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "python"
+        }
       }
     }
   },
@@ -101,6 +107,13 @@
       "description": "Verbosity of the proxy's own logging. One of DEBUG, INFO, WARNING, ERROR. INFO is recommended; switch to DEBUG only when troubleshooting.",
       "required": false,
       "default": "INFO"
+    },
+    "base_url": {
+      "type": "string",
+      "title": "Business Central MCP endpoint",
+      "description": "Default is the v28 host (https://mcp.businesscentral.dynamics.com), which is what Microsoft now documents for non-Microsoft MCP clients. For BC v27 and earlier, set this to https://api.businesscentral.dynamics.com — the proxy auto-switches the OAuth scope and request headers to match.",
+      "required": false,
+      "default": "https://mcp.businesscentral.dynamics.com"
     }
   },
   "tools_generated": true
