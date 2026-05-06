@@ -1,0 +1,97 @@
+name: Release
+
+# On `git push --tags` of a v*.*.* tag, build the .dxt bundle on each
+# supported host (Windows / macOS / Linux), publish a GitHub Release, and
+# attach the bundles as assets. Each host produces a bundle pinned to its
+# own platform's wheels — that is unavoidable because cryptography ships
+# different binary wheels per platform.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.5.0). Required for manual runs."
+        required: true
+
+permissions:
+  contents: write   # required to create releases and upload assets
+
+jobs:
+  build:
+    name: Build .dxt (${{ matrix.platform_tag }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform_tag: win-amd64
+            build_cmd: pwsh dxt/build.ps1
+          - os: macos-latest
+            platform_tag: darwin-arm64
+            build_cmd: ./dxt/build.sh
+          - os: ubuntu-latest
+            platform_tag: linux-x86_64
+            build_cmd: ./dxt/build.sh
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build bundle
+        shell: bash
+        run: ${{ matrix.build_cmd }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxt-${{ matrix.platform_tag }}
+          path: dist/*.dxt
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Download all artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List downloaded bundles
+        run: ls -la dist
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          files: dist/*.dxt

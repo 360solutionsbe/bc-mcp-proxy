@@ -18,6 +18,27 @@
 - **What it costs**: nothing in licenses — MCP is built into BC starting from version 26 (May 2025 release wave). You choose your AI client (Claude Desktop is free for personal use).
 - **The hard part**: creating an Azure App Registration with the right permissions. Ten minutes for someone IT-comfortable; the toughest part for everyone else. We're happy to help — see the [Need help?](#need-help) section.
 
+## Quick install (Claude Desktop)
+
+Pre-built `.dxt` bundles are published on each release with all Python dependencies vendored — no `pip install` step required.
+
+1. **Download** the bundle for your platform from the [latest release](https://github.com/360solutionsbe/bc-mcp-proxy/releases/latest):
+
+   | Platform | Asset |
+   |---|---|
+   | Windows 64-bit | `bc-mcp-proxy-<version>-win-amd64.dxt` |
+   | macOS Apple Silicon | `bc-mcp-proxy-<version>-darwin-arm64.dxt` |
+   | macOS Intel | `bc-mcp-proxy-<version>-darwin-x86_64.dxt` |
+   | Linux x86_64 | `bc-mcp-proxy-<version>-linux-x86_64.dxt` |
+
+2. **Double-click** the downloaded file. Claude Desktop opens an install dialog.
+3. **Fill in** Tenant ID, Client ID, Environment, Company, (optional) Configuration Name. The defaults already point at the BC v28 endpoint; override via the *Business Central MCP endpoint* field for v26/v27.
+4. **Restart Claude Desktop.**
+
+That's the whole install. The Azure App Registration setup is the only remaining step — see [Step 1 — Azure App Registration](#step-1--azure-app-registration) below, or contact us via the [Need help?](#need-help) section if you'd prefer it done for you.
+
+> Building from source (`pwsh dxt/build.ps1` or `./dxt/build.sh`) produces an identical bundle. Use the build path if you want to inspect the artifact, customise the manifest, or ship a private fork.
+
 ## What this fork adds
 
 - ✅ **Reconnect on transient upstream errors.** `httpx.ReadTimeout`, `RemoteProtocolError`, and `NetworkError` (including the same errors wrapped in an `ExceptionGroup` by anyio) trigger an exponential backoff reconnect — `1s → 2s → 4s → 8s → 16s`, default 5 attempts. The local stdio pipe to your MCP client stays open while reconnecting.
