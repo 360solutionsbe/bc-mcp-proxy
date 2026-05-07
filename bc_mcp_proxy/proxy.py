@@ -11,6 +11,7 @@ from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
+from mcp.shared.exceptions import McpError
 from mcp.types import CallToolResult, Implementation, ListToolsResult
 
 import os
@@ -39,6 +40,21 @@ _RECOVERABLE_HTTPX_ERRORS: tuple[type[BaseException], ...] = (
 DEFAULT_RECONNECT_MAX_ATTEMPTS = 5
 DEFAULT_RECONNECT_BASE_BACKOFF = 1.0
 DEFAULT_RECONNECT_MAX_BACKOFF = 16.0
+
+# MCP streamable_http client emits this code when BC returns HTTP 404 to a
+# tool POST — see mcp/client/streamable_http.py:_send_session_terminated_error.
+# BC invalidates its session some time after the original access token
+# expires; every reuse of the cached session_id 404s after that point.
+_SESSION_TERMINATED_ERROR_CODE = 32600
+
+
+class _UpstreamSessionExpiredError(Exception):
+  """Internal signal that triggers a reconnect from inside _open_and_serve.
+
+  The connection manager treats this as a recoverable error, so the existing
+  backoff/reconnect loop reopens the HTTP connection and runs initialize()
+  again — which mints a new session_id and (via _AsyncBearerAuth) asks MSAL
+  for a fresh access token."""
 
 # Substrings that indicate the upstream returned an error message inside a
 # successful (isError=False) response. Match is case-insensitive.
@@ -72,7 +88,8 @@ def _iter_leaf_exceptions(exc: BaseException):
 
 
 def _is_recoverable_upstream_error(exc: BaseException) -> bool:
-  """Return True iff every leaf inside `exc` is a recoverable httpx error.
+  """Return True iff every leaf inside `exc` is a recoverable httpx error
+  (or the deliberate `_UpstreamSessionExpiredError` reconnect signal).
 
   The streamablehttp_client transport runs inside an anyio task group, so
   what bubbles out is often an ExceptionGroup wrapping one or more
@@ -80,10 +97,23 @@ def _is_recoverable_upstream_error(exc: BaseException) -> bool:
   are recoverable — a non-recoverable cause (KeyboardInterrupt, an
   internal AssertionError, etc.) must always propagate.
   """
+  if isinstance(exc, _UpstreamSessionExpiredError):
+    return True
   leaves = list(_iter_leaf_exceptions(exc))
   if not leaves:
     return False
   return all(isinstance(leaf, _RECOVERABLE_HTTPX_ERRORS) for leaf in leaves)
+
+
+def _is_session_terminated_error(exc: BaseException) -> bool:
+  """True iff `exc` is the McpError the client lib raises when BC has
+  invalidated our server-side session (HTTP 404 on the tool POST)."""
+  if not isinstance(exc, McpError):
+    return False
+  error = getattr(exc, "error", None)
+  if error is None:
+    return False
+  return getattr(error, "code", None) == _SESSION_TERMINATED_ERROR_CODE
 
 
 def _exception_hints_at_client_cancel(exc: BaseException) -> bool:
@@ -249,6 +279,22 @@ class _UpstreamConnectionManager:
     self.max_backoff = max_backoff
     self.sleep = sleep
     self._attempt = 0
+    # Set by request_reconnect() to break out of the in-serve wait below
+    # and force the run-loop to reopen the upstream connection.
+    self._reconnect_requested = asyncio.Event()
+    self._reconnect_reason: str = ""
+
+  def request_reconnect(self, *, reason: str) -> None:
+    """Tear down the current upstream and reconnect on the next loop iteration.
+
+    Called when an in-flight tool call discovers the server-side session has
+    been invalidated (BC returns 404 / "Session terminated"). Clearing the
+    holder up-front makes any concurrent waiters block on `wait_active()`
+    until `_open_and_serve` brings the new session online.
+    """
+    self._reconnect_reason = reason
+    self.state.clear_session()
+    self._reconnect_requested.set()
 
   async def run(self) -> None:
     while True:
@@ -337,9 +383,15 @@ class _UpstreamConnectionManager:
         # Each successful init resets the retry budget; subsequent failures
         # start the backoff sequence over.
         self._attempt = 0
-        # Block until the session terminates; the surrounding async-with's
-        # exit handlers will run when the upstream raises.
-        await asyncio.Event().wait()
+        # Park here until the session dies on its own (the upstream raises
+        # out from under us) or _call_tool calls request_reconnect() because
+        # BC told us the session is gone. Either way, raising on wakeup lets
+        # the surrounding async-with's run their cleanup before run() retries.
+        self._reconnect_requested.clear()
+        await self._reconnect_requested.wait()
+        reason = self._reconnect_reason or "reconnect requested"
+        self._reconnect_reason = ""
+        raise _UpstreamSessionExpiredError(reason)
 
 
 async def run_proxy(config: ProxyConfig) -> None:
@@ -408,7 +460,6 @@ async def run_proxy(config: ProxyConfig) -> None:
       asyncio.create_task(_refresh_tools_cache(state, cache, config, logger))
       return stale
 
-    session = await state.wait_active()
     logger.debug("Listing tools via remote MCP session %s", state.session_id() or "<pending>")
     async with cache.lock:
       # Re-check after acquiring the lock — the pre-warm or another
@@ -416,16 +467,22 @@ async def run_proxy(config: ProxyConfig) -> None:
       fresh = cache.get_fresh()
       if fresh is not None:
         return fresh
-      result = await session.list_tools()
+      result = await _invoke_with_session_recovery(
+          state, manager, logger,
+          "list_tools", lambda s: s.list_tools(),
+      )
       cache.store(result)
       tools_cache.save_disk_cache(config, result)
     return result
 
   @server.call_tool()
   async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
-    session = await state.wait_active()
     logger.debug("Calling tool '%s' (session %s)", name, state.session_id() or "<pending>")
-    result = await session.call_tool(name, arguments or {})
+    result = await _invoke_with_session_recovery(
+        state, manager, logger,
+        f"call_tool[{name}]",
+        lambda s: s.call_tool(name, arguments or {}),
+    )
     masked = _detect_masked_error(result)
     if masked is not None:
       logger.warning(
@@ -462,6 +519,33 @@ async def run_proxy(config: ProxyConfig) -> None:
     await asyncio.gather(*pending, return_exceptions=True)
     for task in done:
       task.result()  # re-raise upstream/server failures
+
+
+async def _invoke_with_session_recovery(
+    state: _UpstreamSessionHolder,
+    manager: _UpstreamConnectionManager,
+    logger: logging.Logger,
+    operation: str,
+    do: Callable[[ClientSession], Awaitable[Any]],
+) -> Any:
+  """Run `do(session)`, retrying once on a "Session terminated" error.
+
+  When the upstream raises McpError(code=32600), call request_reconnect()
+  and try again with the new session. A second failure propagates so the
+  client sees it instead of the proxy looping."""
+  for attempt in range(2):
+    session = await state.wait_active()
+    try:
+      return await do(session)
+    except McpError as exc:
+      if attempt == 0 and _is_session_terminated_error(exc):
+        logger.warning(
+            "Upstream returned 'Session terminated' during %s; "
+            "forcing reconnect and retrying once", operation,
+        )
+        manager.request_reconnect(reason=f"session terminated during {operation}")
+        continue
+      raise
 
 
 async def _refresh_tools_cache(
