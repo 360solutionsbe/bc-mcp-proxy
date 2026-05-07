@@ -93,16 +93,19 @@ def _is_recoverable_upstream_error(exc: BaseException) -> bool:
 
   The streamablehttp_client transport runs inside an anyio task group, so
   what bubbles out is often an ExceptionGroup wrapping one or more
-  httpx errors. We treat the bundle as recoverable only when *all* leaves
-  are recoverable — a non-recoverable cause (KeyboardInterrupt, an
-  internal AssertionError, etc.) must always propagate.
+  httpx errors — or, when we raise our own reconnect signal from inside
+  `_open_and_serve`, an ExceptionGroup wrapping a `_UpstreamSessionExpiredError`.
+  We treat the bundle as recoverable only when *all* leaves are recoverable
+  — a non-recoverable cause (KeyboardInterrupt, an internal AssertionError,
+  etc.) must always propagate.
   """
   if isinstance(exc, _UpstreamSessionExpiredError):
     return True
   leaves = list(_iter_leaf_exceptions(exc))
   if not leaves:
     return False
-  return all(isinstance(leaf, _RECOVERABLE_HTTPX_ERRORS) for leaf in leaves)
+  recoverable_leaf_types = _RECOVERABLE_HTTPX_ERRORS + (_UpstreamSessionExpiredError,)
+  return all(isinstance(leaf, recoverable_leaf_types) for leaf in leaves)
 
 
 def _is_session_terminated_error(exc: BaseException) -> bool:

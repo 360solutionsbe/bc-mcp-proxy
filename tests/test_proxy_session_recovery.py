@@ -55,6 +55,19 @@ def test_session_expired_signal_is_recoverable() -> None:
   assert _is_recoverable_upstream_error(_UpstreamSessionExpiredError("bye"))
 
 
+def test_session_expired_signal_wrapped_in_exception_group_is_recoverable() -> None:
+  # In production, _open_and_serve raises _UpstreamSessionExpiredError from
+  # *inside* nested anyio task groups (streamablehttp_client + ClientSession).
+  # Anyio wraps the single exception in BaseExceptionGroup on the way out, so
+  # the reconnect loop sees `EG -> EG -> _UpstreamSessionExpiredError` rather
+  # than the bare exception. The classifier must still return True or the
+  # proxy will crash on every upstream session-terminated event.
+  from bc_mcp_proxy.proxy import _BaseExceptionGroup
+  inner = _BaseExceptionGroup("inner", [_UpstreamSessionExpiredError("bye")])
+  outer = _BaseExceptionGroup("outer", [inner])
+  assert _is_recoverable_upstream_error(outer)
+
+
 # -- Connection manager: request_reconnect plumbing --------------------------
 
 
