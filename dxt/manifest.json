@@ -2,7 +2,7 @@
   "dxt_version": "0.1",
   "name": "360solutions-bc-mcp",
   "display_name": "Business Central MCP Proxy",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Bridge Claude Desktop to a Microsoft Dynamics 365 Business Central environment via the official BC MCP endpoint.",
   "long_description": "Resilient stdio MCP proxy that forwards tool calls from Claude Desktop to the Business Central MCP HTTP endpoint. Forked from microsoft/BCTech samples/BcMCPProxyPython with production fixes: reconnect on transient httpx errors with exponential backoff, pre-emptive MSAL silent token refresh, surfacing of upstream errors that arrive masked as successful responses, and BC v28 endpoint support. Maintained by 360 Solutions (a Vangelder Solutions brand). Tenant ID, client ID, environment, company and configuration name are configured at install time via the prompts below.",
   "author": {
