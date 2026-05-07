@@ -7,15 +7,14 @@
 #
 # What this does:
 #   1. Stages the proxy source under dxt/build/server/bc_mcp_proxy.
-#   2. Vendors all Python dependencies (mcp, httpx, msal, transitive
-#      security pins, etc.) into dxt/build/server/ alongside the proxy.
-#      Python sees them all under PYTHONPATH=${__dirname}/server, so
-#      Claude Desktop can launch the proxy on a fresh machine without
-#      needing a pre-existing `pip install`.
-#   3. Wheels are pinned to Python 3.10 / Windows AMD64 — this matches
-#      the Microsoft Store Python that Claude Desktop on Windows
-#      typically resolves as `python3`. The cp310 wheels run fine on
-#      Python 3.11 / 3.12 / 3.13 too where they ship as abi3-stable.
+#   2. Vendors all Python dependencies once per supported ABI under
+#      dxt/build/server/wheels/cp{310,311,312,313}/. Several deps
+#      (pydantic_core, charset_normalizer, rpds, mypyc-built ones)
+#      ship Python-version-specific compiled wheels rather than abi3,
+#      so a single ABI's wheels won't load on a different Python.
+#      The shim in bc_mcp_proxy/__init__.py picks the right dir at
+#      startup based on sys.version_info.
+#   3. Targets win_amd64 wheels.
 #
 # Requires:
 #   - Python 3.10+ on PATH (used to invoke pip)
@@ -51,16 +50,21 @@ if (Test-Path 'dxt/icon.png') {
   Write-Host "  (no dxt/icon.png — bundle will ship without an icon)"
 }
 
-Write-Host "Vendoring Python dependencies into $buildDir/server ..."
-& python -m pip install `
-    --target "$buildDir/server" `
-    --upgrade `
-    --no-compile `
-    --python-version '3.10' `
-    --only-binary ':all:' `
-    --platform 'win_amd64' `
-    -r 'dxt/requirements.txt'
-if ($LASTEXITCODE -ne 0) { throw "pip install --target failed (exit $LASTEXITCODE)" }
+$pythonAbis = @('310', '311', '312', '313')
+foreach ($abi in $pythonAbis) {
+  $pyVer = '3.' + $abi.Substring(1)
+  $abiDir = Join-Path $buildDir "server/wheels/cp$abi"
+  Write-Host "Vendoring wheels for Python $pyVer (cp$abi) into $abiDir ..."
+  & python -m pip install `
+      --target $abiDir `
+      --upgrade `
+      --no-compile `
+      --python-version $pyVer `
+      --only-binary ':all:' `
+      --platform 'win_amd64' `
+      -r 'dxt/requirements.txt'
+  if ($LASTEXITCODE -ne 0) { throw "pip install for cp$abi failed (exit $LASTEXITCODE)" }
+}
 
 # Strip only __pycache__. Do NOT strip *.dist-info — the mcp package
 # (and any other dep that calls importlib.metadata.version("<self>") at

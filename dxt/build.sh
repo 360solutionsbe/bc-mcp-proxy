@@ -8,11 +8,14 @@
 #
 # What this does:
 #   1. Stages the proxy source under dxt/build/server/bc_mcp_proxy.
-#   2. Vendors all Python dependencies into dxt/build/server/ alongside
-#      the proxy. Python sees them under PYTHONPATH=${__dirname}/server,
-#      so Claude Desktop can launch the proxy on a fresh machine without
-#      needing a pre-existing `pip install`.
-#   3. Wheels are pinned to Python 3.10 + the host's platform tag.
+#   2. Vendors all Python dependencies once per supported ABI under
+#      dxt/build/server/wheels/cp{310,311,312,313}/. Several deps
+#      (pydantic_core, charset_normalizer, rpds, mypyc-built ones)
+#      ship Python-version-specific compiled wheels rather than abi3,
+#      so a single ABI's wheels won't load on a different Python.
+#      The shim in bc_mcp_proxy/__init__.py picks the right dir at
+#      startup based on sys.version_info.
+#   3. Wheels target the host's platform tag (manylinux2014 / macosx).
 #
 # Requires:
 #   - Python 3.10+ on PATH
@@ -69,15 +72,19 @@ else
   echo "  (no dxt/icon.png — bundle will ship without an icon)"
 fi
 
-echo "Vendoring Python dependencies into $build_dir/server ..."
-python3 -m pip install \
-  --target "$build_dir/server" \
-  --upgrade \
-  --no-compile \
-  --python-version '3.10' \
-  --only-binary ':all:' \
-  --platform "$pip_platform" \
-  -r dxt/requirements.txt
+for abi in 310 311 312 313; do
+  py_ver="3.${abi:1}"
+  abi_dir="$build_dir/server/wheels/cp$abi"
+  echo "Vendoring wheels for Python $py_ver (cp$abi) into $abi_dir ..."
+  python3 -m pip install \
+    --target "$abi_dir" \
+    --upgrade \
+    --no-compile \
+    --python-version "$py_ver" \
+    --only-binary ':all:' \
+    --platform "$pip_platform" \
+    -r dxt/requirements.txt
+done
 
 # Strip only __pycache__. Do NOT strip *.dist-info — the mcp package
 # (and any other dep that calls importlib.metadata.version("<self>") at
