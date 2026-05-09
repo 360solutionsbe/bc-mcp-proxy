@@ -367,6 +367,14 @@ Pre-built bundles for these three platforms are attached to every GitHub Release
 
 ---
 
+## Privacy & Anthropic subscription
+
+When you use this proxy, your BC queries and the data returned in response are processed by whichever AI provider your MCP client is wired to — most commonly Anthropic's Claude. **The subscription tier you pick (Team / Enterprise / API vs Free / Pro / Max) materially changes how that data is retained and whether it can be used for model training**, and it determines whether a Data Processing Addendum is available — which matters for GDPR if you are established in the EU/EEA.
+
+For production use against a live BC tenant we recommend Claude Team, Claude Enterprise, or Anthropic API access — see [`NOTICE.md`](NOTICE.md) for the full recommendation, the responsibility split, and the trademark notice.
+
+---
+
 ## Development
 
 ```bash
