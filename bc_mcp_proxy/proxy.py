@@ -574,16 +574,20 @@ def _build_transport_headers(config: ProxyConfig) -> dict[str, str]:
       "X-Client-Application": config.server_name,
   }
   if config.company:
-    headers["Company"] = unquote(config.company)
+    headers["Company"] = unquote(config.company).strip()
   if config.configuration_name:
-    headers["ConfigurationName"] = unquote(config.configuration_name)
+    headers["ConfigurationName"] = unquote(config.configuration_name).strip()
   if is_v28_endpoint(config.base_url):
     # The v28 host requires routing info in headers because the URL no
-    # longer carries the environment in its path.
+    # longer carries the environment in its path. .strip() here is
+    # defense-in-depth — __main__._clean already strips at the CLI/env
+    # boundary, but callers that build ProxyConfig directly (tests,
+    # embedders) bypass that path. A trailing space here surfaces as
+    # `LocalProtocolError("Illegal header value …")` from httpx/h11.
     if config.tenant_id:
-      headers["TenantId"] = config.tenant_id
+      headers["TenantId"] = config.tenant_id.strip()
     if config.environment:
-      headers["EnvironmentName"] = config.environment
+      headers["EnvironmentName"] = config.environment.strip()
   return headers
 
 
