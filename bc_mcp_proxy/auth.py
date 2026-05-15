@@ -138,7 +138,11 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
         "message",
         f"To sign in, use code {flow.get('user_code')} at {flow.get('verification_uri')}.")
     self._logger.warning(message)
-    print(message, flush=True)
+    # Must go to stderr: stdout is the MCP stdio protocol channel, and the
+    # client (Claude Desktop, Cursor, etc.) tries to parse every line as
+    # JSON-RPC. A bare `print()` here breaks the transport with
+    # `Unexpected token 'T', "To sign in"... is not valid JSON`.
+    print(message, file=sys.stderr, flush=True)
 
 
 def create_token_provider(

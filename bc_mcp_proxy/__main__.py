@@ -127,11 +127,30 @@ def _select(
     default_value: Optional[str],
 ) -> Optional[str]:
   if cli_value is not None:
-    return cli_value
+    return _clean(key, cli_value)
   env_value = env.get(key)
   if env_value is not None:
-    return env_value
+    return _clean(key, env_value)
   return default_value
+
+
+def _clean(key: str, value: str) -> str:
+  """Strip surrounding whitespace from user-supplied config values.
+
+  A trailing space on something like BC_TENANT_ID (easy to pick up when
+  copy-pasting a GUID from the Azure portal) becomes an illegal HTTP
+  header value once the proxy passes it to the v28 host — httpx/h11
+  rejects the request with a `LocalProtocolError` that points at the
+  transport, not the typo. Strip at the input boundary so the failure
+  mode is fixed for every downstream consumer.
+  """
+  stripped = value.strip()
+  if stripped != value:
+    logging.getLogger("bc_mcp_proxy").warning(
+        "Stripped surrounding whitespace from %s (check the env var or "
+        "CLI argument — pasted values sometimes carry stray spaces).", key,
+    )
+  return stripped
 
 
 def _select_float(

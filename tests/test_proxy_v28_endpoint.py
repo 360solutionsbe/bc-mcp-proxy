@@ -92,3 +92,38 @@ def test_v28_headers_omit_tenant_when_not_configured() -> None:
   h = _build_transport_headers(cfg)
   assert "TenantId" not in h
   assert h["EnvironmentName"] == "Sandbox"
+
+
+def test_v28_headers_strip_surrounding_whitespace() -> None:
+  """A trailing space on tenant_id/environment must not reach the wire.
+
+  Without stripping, httpx/h11 raises `LocalProtocolError("Illegal header
+  value …")` because HTTP forbids trailing whitespace in header values.
+  Reproduces the v27.5 prospect report from 2026-05-14.
+  """
+  cfg = ProxyConfig(
+      base_url="https://mcp.businesscentral.dynamics.com",
+      tenant_id="424d4f18-97e7-4dca-8b0e-804a146eca73 ",
+      environment=" Sandbox ",
+      company=" CRONUS USA ",
+      configuration_name=" My MCP Configuration ",
+  )
+  h = _build_transport_headers(cfg)
+  assert h["TenantId"] == "424d4f18-97e7-4dca-8b0e-804a146eca73"
+  assert h["EnvironmentName"] == "Sandbox"
+  assert h["Company"] == "CRONUS USA"
+  assert h["ConfigurationName"] == "My MCP Configuration"
+
+
+def test_v28_headers_preserve_internal_whitespace() -> None:
+  """Only surrounding whitespace is stripped — `CRONUS USA` stays as-is."""
+  cfg = ProxyConfig(
+      base_url="https://mcp.businesscentral.dynamics.com",
+      tenant_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      environment="Sandbox",
+      company="CRONUS USA",
+      configuration_name="My MCP Configuration",
+  )
+  h = _build_transport_headers(cfg)
+  assert h["Company"] == "CRONUS USA"
+  assert h["ConfigurationName"] == "My MCP Configuration"
