@@ -2,9 +2,9 @@
   "dxt_version": "0.1",
   "name": "360solutions-bc-mcp",
   "display_name": "Business Central MCP Proxy",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Bridge Claude Desktop to a Microsoft Dynamics 365 Business Central environment via the official BC MCP endpoint.",
-  "long_description": "Resilient stdio MCP proxy that forwards tool calls from Claude Desktop to the Business Central MCP HTTP endpoint. Forked from microsoft/BCTech samples/BcMCPProxyPython with production fixes: reconnect on transient httpx errors with exponential backoff, pre-emptive MSAL silent token refresh, surfacing of upstream errors that arrive masked as successful responses, and BC v28 endpoint support. Maintained by 360 Solutions (a Vangelder Solutions brand). Tenant ID, client ID, environment, company and configuration name are configured at install time via the prompts below.",
+  "long_description": "Resilient stdio MCP proxy that forwards tool calls from Claude Desktop to the Business Central MCP HTTP endpoint. Forked from microsoft/BCTech samples/BcMCPProxyPython with production fixes: interactive browser sign-in (device-code fallback), non-blocking tool discovery (no 30s first-call hang) that emits tools/list_changed, reconnect on transient httpx errors with exponential backoff, pre-emptive MSAL silent token refresh, surfacing of upstream errors that arrive masked as successful responses, and BC v28 endpoint support. Interactive sign-in requires 'http://localhost' added to the Azure app registration under Authentication > Mobile and desktop applications. Maintained by 360 Solutions (a Vangelder Solutions brand). Tenant ID, client ID, environment, company and configuration name are configured at install time via the prompts below.",
   "author": {
     "name": "360 Solutions",
     "email": "dev@360solutions.be",
@@ -54,7 +54,8 @@
         "PYTHONPATH": "${__dirname}/server",
         "BC_CONFIGURATION_NAME": "${user_config.configuration_name}",
         "BC_LOG_LEVEL": "${user_config.log_level}",
-        "BC_BASE_URL": "${user_config.base_url}"
+        "BC_BASE_URL": "${user_config.base_url}",
+        "BC_AUTH_MODE": "${user_config.auth_mode}"
       },
       "platform_overrides": {
         "win32": {
@@ -114,6 +115,13 @@
       "description": "Default is the v28 host (https://mcp.businesscentral.dynamics.com), which is what Microsoft now documents for non-Microsoft MCP clients. For BC v27 and earlier, set this to https://api.businesscentral.dynamics.com — the proxy auto-switches the OAuth scope and request headers to match.",
       "required": false,
       "default": "https://mcp.businesscentral.dynamics.com"
+    },
+    "auth_mode": {
+      "type": "string",
+      "title": "Authentication mode",
+      "description": "How to sign in on first use. 'auto' (recommended): open the browser for an interactive sign-in, automatically falling back to the device-code flow if no browser is available. 'interactive': browser only. 'device_code': skip the browser entirely (use on headless/server hosts). Interactive sign-in requires the Azure app registration to have 'http://localhost' added under Authentication > Mobile and desktop applications.",
+      "required": false,
+      "default": "auto"
     }
   },
   "tools_generated": true

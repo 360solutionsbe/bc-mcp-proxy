@@ -16,6 +16,23 @@ from .config import ProxyConfig
 
 DEFAULT_REFRESH_SKEW_SECONDS = 300.0
 
+# How long to wait for the user to complete the interactive browser sign-in
+# before giving up. On timeout we fall back to device code (auto mode) or
+# raise an actionable error (interactive mode). Kept generous because the
+# upstream connection task is long-lived under the non-blocking model.
+_INTERACTIVE_TIMEOUT_SECONDS = 300
+
+# AAD error tokens that mean "the app registration has no usable redirect URI
+# for the loopback interactive flow". Surfaced as an actionable message.
+_REDIRECT_URI_MISCONFIG_TOKENS = ("AADSTS500113", "AADSTS50011")
+
+
+class _InteractiveAuthError(Exception):
+  """Interactive (browser+loopback) sign-in was attempted but failed.
+
+  Carries a user-actionable message. In auth_mode="auto" this is caught and
+  the provider falls back to device code; in "interactive" it propagates."""
+
 
 class TokenProvider(Protocol):
   async def get_token(self) -> str:
@@ -36,7 +53,17 @@ DeviceFlowCallback = Callable[[dict[str, str]], None]
 
 
 class MsalDeviceCodeTokenProvider(TokenProvider):
-  """Token provider that acquires tokens via the MSAL device code flow."""
+  """Acquires BC tokens via MSAL.
+
+  Acquisition order (no valid cached token): silent refresh → interactive
+  browser+loopback → device code. `auth_mode` controls which non-silent
+  paths are eligible:
+    "auto"        — interactive first, device code as automatic fallback
+    "interactive" — interactive only; fail with an actionable error
+    "device_code" — skip interactive (headless / server installs)
+
+  Name retained for backward compatibility with existing imports/tests even
+  though it is no longer device-code-only."""
 
   def __init__(
       self,
@@ -48,11 +75,12 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
       device_flow_callback: Optional[DeviceFlowCallback] = None,
       refresh_skew_seconds: float = DEFAULT_REFRESH_SKEW_SECONDS,
       time_source: Callable[[], float] = time.time,
+      auth_mode: str = "auto",
   ) -> None:
     if not tenant_id:
-      raise ValueError("Tenant ID is required for device code authentication.")
+      raise ValueError("Tenant ID is required for authentication.")
     if not client_id:
-      raise ValueError("Client ID is required for device code authentication.")
+      raise ValueError("Client ID is required for authentication.")
     if not scopes:
       raise ValueError("At least one scope must be supplied.")
 
@@ -60,6 +88,8 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
 
     self._logger = logger or logging.getLogger(__name__)
     self._scopes = scopes
+    self._client_id = client_id
+    self._auth_mode = auth_mode
     self._cache = PersistedTokenCache(FilePersistence(str(cache_path)))
     authority = f"https://login.microsoftonline.com/{tenant_id}"
     self._app = msal.PublicClientApplication(
@@ -84,9 +114,9 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
     return self._cached_expires_at - self._time()
 
   def _acquire_token(self) -> str:
-    # If we previously cached a token but it has now drifted into the
-    # refresh window, ask MSAL to bypass its in-memory access-token cache
-    # and use the refresh token to mint a new one.
+    # 1. Silent: if we previously cached a token but it has now drifted into
+    # the refresh window, ask MSAL to bypass its in-memory access-token cache
+    # and use the refresh token to mint a new one. Always tried first.
     needs_force_refresh = self._cached_token is not None
     accounts = self._app.get_accounts() or []
     for account in accounts:
@@ -104,6 +134,53 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
         )
         return token
 
+    # 2. Interactive (browser + loopback redirect), if the mode allows it.
+    if self._auth_mode in ("auto", "interactive"):
+      try:
+        return self._acquire_interactive()
+      except _InteractiveAuthError as exc:
+        if self._auth_mode == "interactive":
+          # No fallback in interactive-only mode — surface the actionable
+          # message (e.g. missing redirect URI) instead of hanging.
+          raise RuntimeError(str(exc)) from exc
+        self._logger.warning(
+            "Interactive sign-in unavailable (%s); falling back to device code.",
+            exc,
+        )
+
+    # 3. Device code — explicit device_code mode, or auto's fallback.
+    return self._acquire_device_code()
+
+  def _acquire_interactive(self) -> str:
+    """Open the system browser and complete an auth-code flow over a
+    localhost loopback redirect. Raises _InteractiveAuthError on any
+    failure so the caller can fall back (auto) or surface it (interactive)."""
+    try:
+      result = self._app.acquire_token_interactive(
+          scopes=self._scopes,
+          prompt="select_account",
+          timeout=_INTERACTIVE_TIMEOUT_SECONDS,
+      )
+    except Exception as exc:  # noqa: BLE001 - local failure (no browser, port bind, timeout)
+      raise _InteractiveAuthError(
+          f"could not run the interactive browser flow: {exc}") from exc
+
+    token = self._store_result(result)
+    if token:
+      self._logger.info("Acquired token via interactive browser sign-in.")
+      return token
+
+    desc = (result or {}).get("error_description") or str(result)
+    if any(tok in desc for tok in _REDIRECT_URI_MISCONFIG_TOKENS):
+      raise _InteractiveAuthError(
+          "the Azure app registration is missing a redirect URI for the "
+          "interactive sign-in. In Microsoft Entra ID, open the app "
+          f"registration (client id {self._client_id}) → Authentication → "
+          "Add a platform → 'Mobile and desktop applications' → check "
+          "'http://localhost'. Underlying AAD error: " + desc)
+    raise _InteractiveAuthError(f"interactive sign-in returned no token: {desc}")
+
+  def _acquire_device_code(self) -> str:
     flow = self._app.initiate_device_flow(scopes=self._scopes)
     if "user_code" not in flow:
       message = flow.get("error_description") or "Unable to initiate device code flow."
@@ -162,6 +239,7 @@ def create_token_provider(
       cache_path=cache_path,
       logger=logger,
       refresh_skew_seconds=config.token_refresh_skew_seconds,
+      auth_mode=config.auth_mode,
   )
 
 

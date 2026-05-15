@@ -63,6 +63,6 @@ from .config import ProxyConfig  # noqa: E402, F401
 from .proxy import run_proxy  # noqa: E402, F401
 
 __all__ = ["ProxyConfig", "run_proxy", "__version__"]
-__version__ = "0.5.4"
+__version__ = "0.5.5"
 
 

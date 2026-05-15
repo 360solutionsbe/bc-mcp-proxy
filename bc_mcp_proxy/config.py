@@ -17,6 +17,9 @@ V27_BASE_URL = "https://api.businesscentral.dynamics.com"
 V27_SCOPE = "https://api.businesscentral.dynamics.com/.default"
 V28_SCOPE = "https://mcp.businesscentral.dynamics.com/.default"
 
+# Valid values for ProxyConfig.auth_mode / --AuthMode / BC_AUTH_MODE.
+AUTH_MODES = ("auto", "interactive", "device_code")
+
 
 def is_v28_endpoint(base_url: str) -> bool:
   """Detect the v28+ Business Central MCP host.
@@ -105,7 +108,7 @@ class ProxyConfig:
   """Configuration values required to run the Business Central MCP proxy."""
 
   server_name: str = "BcMCPProxyPython"
-  server_version: str = "0.5.4"
+  server_version: str = "0.5.5"
   instructions: Optional[str] = None
 
   tenant_id: Optional[str] = None
@@ -120,6 +123,13 @@ class ProxyConfig:
   configuration_name: Optional[str] = None
 
   custom_auth_header: Optional[str] = None
+  # How to acquire a token when no valid cached one exists:
+  #   "auto"        — try the interactive browser+loopback flow first, fall
+  #                    back to device code if no browser / loopback is usable
+  #   "interactive" — interactive only; fail with an actionable error
+  #   "device_code" — skip interactive entirely (headless / server installs)
+  # The silent (cached refresh-token) path is always tried first regardless.
+  auth_mode: str = "auto"
   # 30s is too tight for BC v28 dynamic mode with Discover Additional
   # Objects on — the first bc_actions_search measured ~57s server-side.
   http_timeout_seconds: float = 120.0
