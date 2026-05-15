@@ -226,19 +226,30 @@ python -m bc_mcp_proxy setup
 
 ### Step 6 — First sign-in
 
-On first use the proxy opens your **default browser** to the normal Microsoft
-sign-in page (interactive auth-code flow with a localhost loopback redirect).
-Sign in with the Azure account that has the BC permissions — no code to copy,
-nothing to read out of the logs. The token is then cached locally (via
-`msal-extensions` with platform-specific secure storage); subsequent runs are
-non-interactive until expiry, at which point the proxy refreshes silently using
-the refresh token.
+**Recommended: pre-authenticate once from a terminal** so your very first
+Claude Desktop launch already has a token and tools cached:
 
-Discovery is **non-blocking**: if the client asks for the tool list before
-you've finished signing in, the proxy returns an empty list immediately and
-then pushes `notifications/tools/list_changed` the moment authentication
-completes, so the tools appear without restarting anything. (This is why the
-client no longer has to be restarted after the first sign-in.)
+```bash
+python -m bc_mcp_proxy setup
+```
+
+The wizard signs you in (browser opens to the normal Microsoft sign-in — no
+code to copy, nothing to read from logs) and caches the token + tool list to
+disk. After that, **every** Claude Desktop launch is instant and fully
+non-interactive until token expiry (refreshed silently via the refresh token).
+This is the smoothest path and the one we recommend documenting to end users.
+
+**Without the pre-auth step**, the first launch inside Claude Desktop still
+works, just less smoothly. The proxy opens the browser for sign-in and, so it
+doesn't block, returns an empty tool list immediately while you authenticate
+(no more 30-second hang). It then sends `notifications/tools/list_changed`.
+**Caveat:** current Claude Desktop does *not* re-request the tool list when it
+receives that notification over stdio, so on this very first run the tools
+won't appear until you either ran the `setup` step above, or toggle the
+extension off/on once after signing in. This is a one-time step — from the
+second launch onward the disk cache makes the tool list appear on the first
+call with no reconnect. (Other MCP clients such as Cursor/VS Code may honour
+the notification and refresh automatically; behaviour is client-specific.)
 
 If no browser is available (headless box, locked-down VM) the proxy
 automatically falls back to the **device-code flow**:
