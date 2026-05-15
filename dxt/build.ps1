@@ -8,7 +8,7 @@
 # What this does:
 #   1. Stages the proxy source under dxt/build/server/bc_mcp_proxy.
 #   2. Vendors all Python dependencies once per supported ABI under
-#      dxt/build/server/wheels/cp{310,311,312,313}/. Several deps
+#      dxt/build/server/wheels/cp{310,311,312,313,314}/. Several deps
 #      (pydantic_core, charset_normalizer, rpds, mypyc-built ones)
 #      ship Python-version-specific compiled wheels rather than abi3,
 #      so a single ABI's wheels won't load on a different Python.
@@ -50,7 +50,7 @@ if (Test-Path 'dxt/icon.png') {
   Write-Host "  (no dxt/icon.png — bundle will ship without an icon)"
 }
 
-$pythonAbis = @('310', '311', '312', '313')
+$pythonAbis = @('310', '311', '312', '313', '314')
 foreach ($abi in $pythonAbis) {
   $pyVer = '3.' + $abi.Substring(1)
   $abiDir = Join-Path $buildDir "server/wheels/cp$abi"
