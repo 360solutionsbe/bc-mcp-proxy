@@ -10,6 +10,7 @@ import httpx
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.server import Server
+from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
 from mcp.types import CallToolResult, Implementation, ListToolsResult
@@ -176,6 +177,61 @@ def _backoff_for_attempt(
   return min(base * (2 ** zero_based_attempt), max_value)
 
 
+def _tools_signature(result: Optional[ListToolsResult]) -> int:
+  """Order-independent fingerprint of a tools/list result.
+
+  Used to decide whether the tool set the client currently holds differs
+  from a freshly fetched one — i.e. whether a tools/list_changed push is
+  warranted. Keyed on the sorted tool names; an empty list (the cold-start
+  placeholder) hashes distinctly from any populated list."""
+  tools = getattr(result, "tools", None) or []
+  names = tuple(sorted(getattr(t, "name", "") for t in tools))
+  return hash(names)
+
+
+class _ClientNotifier:
+  """Bridges the background upstream pre-warm to the connected MCP client.
+
+  The stdio request handlers run inside an MCP request context (where
+  `server.request_context.session` is valid); the upstream pre-warm task
+  does not. We capture the ServerSession from the first request handler
+  call so the pre-warm can later push `notifications/tools/list_changed`
+  when the tool set transitions — most importantly empty placeholder ->
+  real list once first-run auth completes, so the client refetches without
+  a restart."""
+
+  def __init__(self, logger: logging.Logger) -> None:
+    self._session: Any = None
+    self._logger = logger
+    self._last_signature: Optional[int] = None
+
+  def capture(self, session: Any) -> None:
+    if self._session is None and session is not None:
+      self._session = session
+
+  def record_served(self, result: Optional[ListToolsResult]) -> None:
+    """Remember what the client now holds so we only notify on real change."""
+    self._last_signature = _tools_signature(result)
+
+  async def maybe_notify(self, result: Optional[ListToolsResult]) -> None:
+    signature = _tools_signature(result)
+    if signature == self._last_signature:
+      return
+    self._last_signature = signature
+    if self._session is None:
+      # No client request has happened yet; the client will pick up the
+      # fresh list on its first tools/list call, so no push is needed.
+      return
+    try:
+      await self._session.send_tool_list_changed()
+      self._logger.debug("Pushed notifications/tools/list_changed to client")
+    except Exception as exc:  # noqa: BLE001 - notification is best-effort
+      self._logger.warning(
+          "Failed to push tools/list_changed (%s); client will refresh on its "
+          "next tools/list", type(exc).__name__,
+      )
+
+
 class _ToolsCache:
   """In-memory tools/list cache shared between stdio handler and upstream
   pre-warm. Reads are lock-free; writes use a lock so concurrent refreshers
@@ -265,6 +321,7 @@ class _UpstreamConnectionManager:
       auth: httpx.Auth,
       logger: logging.Logger,
       tools_cache_obj: Optional[_ToolsCache] = None,
+      notifier: Optional[_ClientNotifier] = None,
       max_attempts: int = DEFAULT_RECONNECT_MAX_ATTEMPTS,
       base_backoff: float = DEFAULT_RECONNECT_BASE_BACKOFF,
       max_backoff: float = DEFAULT_RECONNECT_MAX_BACKOFF,
@@ -277,6 +334,7 @@ class _UpstreamConnectionManager:
     self.auth = auth
     self.logger = logger
     self.tools_cache_obj = tools_cache_obj
+    self.notifier = notifier
     self.max_attempts = max_attempts
     self.base_backoff = base_backoff
     self.max_backoff = max_backoff
@@ -375,6 +433,11 @@ class _UpstreamConnectionManager:
                 "Pre-warmed tools/list cache (%d tools)",
                 len(getattr(tools_result, "tools", []) or []),
             )
+            # Cold first run: the client was handed an empty placeholder
+            # list while auth was pending. Now that real tools exist, push
+            # tools/list_changed so it refetches without a restart.
+            if self.notifier is not None:
+              await self.notifier.maybe_notify(tools_result)
           except Exception as exc:
             # Log but don't propagate — a warmed cache is best-effort.
             self.logger.warning(
@@ -425,6 +488,7 @@ async def run_proxy(config: ProxyConfig) -> None:
 
   state = _UpstreamSessionHolder()
   cache = _ToolsCache(ttl_seconds=config.tools_cache_ttl_seconds)
+  notifier = _ClientNotifier(logger)
 
   # Prepopulate the in-memory cache from disk (if a previous run cached
   # tools for this exact tenant/env/company/config). This is the only
@@ -450,9 +514,18 @@ async def run_proxy(config: ProxyConfig) -> None:
 
   @server.list_tools()
   async def _list_tools() -> Any:
+    # Capture the live ServerSession so the background upstream pre-warm
+    # can push tools/list_changed once auth completes. request_context is
+    # only valid inside a request — which this always is.
+    try:
+      notifier.capture(server.request_context.session)
+    except LookupError:  # pragma: no cover - defensive; always in a request here
+      pass
+
     fresh = cache.get_fresh()
     if fresh is not None:
       logger.debug("Serving tools/list from cache")
+      notifier.record_served(fresh)
       return fresh
 
     stale = cache.get_any()
@@ -460,23 +533,23 @@ async def run_proxy(config: ProxyConfig) -> None:
       # We have something cached but it's beyond the TTL. Serve it now
       # to keep the client unblocked, and refresh in the background.
       logger.debug("Serving stale tools/list; refreshing in background")
-      asyncio.create_task(_refresh_tools_cache(state, cache, config, logger))
+      notifier.record_served(stale)
+      asyncio.create_task(
+          _refresh_tools_cache(state, cache, config, logger, notifier))
       return stale
 
-    logger.debug("Listing tools via remote MCP session %s", state.session_id() or "<pending>")
-    async with cache.lock:
-      # Re-check after acquiring the lock — the pre-warm or another
-      # waiter may have populated the cache while we were blocked.
-      fresh = cache.get_fresh()
-      if fresh is not None:
-        return fresh
-      result = await _invoke_with_session_recovery(
-          state, manager, logger,
-          "list_tools", lambda s: s.list_tools(),
-      )
-      cache.store(result)
-      tools_cache.save_disk_cache(config, result)
-    return result
+    # Nothing cached (cold first run, auth almost certainly still pending).
+    # Do NOT block on the upstream session here — that is exactly what made
+    # the first tools/list hang past Claude's ~30s request timeout. Return
+    # an empty list immediately; the upstream pre-warm task will populate
+    # the cache and push notifications/tools/list_changed so the client
+    # refetches and the tools appear, with no restart.
+    logger.info(
+        "tools/list requested before upstream is ready; returning empty list "
+        "and will push tools/list_changed once authentication completes")
+    empty = ListToolsResult(tools=[])
+    notifier.record_served(empty)
+    return empty
 
   @server.call_tool()
   async def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
@@ -495,7 +568,10 @@ async def run_proxy(config: ProxyConfig) -> None:
       return _flag_as_error(result)
     return result
 
-  init_options = server.create_initialization_options()
+  # Advertise tools.listChanged so the client honours the
+  # notifications/tools/list_changed we push after a cold-start auth.
+  init_options = server.create_initialization_options(
+      NotificationOptions(tools_changed=True))
 
   manager = _UpstreamConnectionManager(
       state=state,
@@ -505,6 +581,7 @@ async def run_proxy(config: ProxyConfig) -> None:
       auth=auth,
       logger=logger,
       tools_cache_obj=cache,
+      notifier=notifier,
   )
 
   async with stdio_server() as (local_read, local_write):
@@ -556,6 +633,7 @@ async def _refresh_tools_cache(
     cache: _ToolsCache,
     config: ProxyConfig,
     logger: logging.Logger,
+    notifier: Optional[_ClientNotifier] = None,
 ) -> None:
   """Background refresh used when serving a stale cached entry."""
   try:
@@ -565,6 +643,9 @@ async def _refresh_tools_cache(
       cache.store(result)
       tools_cache.save_disk_cache(config, result)
     logger.debug("Refreshed stale tools/list cache")
+    if notifier is not None:
+      # If the refreshed set differs from what the client holds, nudge it.
+      await notifier.maybe_notify(result)
   except Exception as exc:
     logger.warning("Background tools/list refresh failed: %s", type(exc).__name__)
 

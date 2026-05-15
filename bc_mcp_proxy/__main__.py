@@ -7,6 +7,7 @@ import sys
 from typing import Optional
 
 from .config import (
+    AUTH_MODES,
     InvalidBaseUrlError,
     ProxyConfig,
     resolve_token_scope,
@@ -35,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
   parser.add_argument("--SseTimeoutSeconds", type=float, dest="sse_timeout_seconds")
   parser.add_argument("--DeviceCacheLocation", dest="device_cache_location")
   parser.add_argument("--DeviceCacheName", dest="device_cache_name")
+  parser.add_argument(
+      "--AuthMode", dest="auth_mode", choices=AUTH_MODES,
+      help="Token acquisition strategy when no valid cached token exists: "
+           "'auto' (interactive browser flow, fall back to device code), "
+           "'interactive', or 'device_code'. Default: auto.")
   parser.add_argument("--Debug", action="store_true", dest="enable_debug")
   return parser
 
@@ -76,6 +82,7 @@ def parse_args(argv: list[str] | None = None) -> ProxyConfig:
           "device_cache_location", args.device_cache_location, env, defaults.device_cache_location),
       device_cache_name=_select(
           "device_cache_name", args.device_cache_name, env, defaults.device_cache_name),
+      auth_mode=_select("auth_mode", args.auth_mode, env, defaults.auth_mode).lower(),
       log_level=_select("log_level", args.log_level, env, defaults.log_level).upper(),
       enable_debug=args.enable_debug or _env_flag("BC_DEBUG"),
   )
@@ -95,6 +102,12 @@ def main(argv: list[str] | None = None) -> None:
     validate_base_url(config.base_url, allow_non_standard=_env_flag("BC_ALLOW_NON_STANDARD_BASE_URL"))
   except InvalidBaseUrlError as exc:
     sys.stderr.write(f"ERROR: {exc}\n")
+    sys.exit(2)
+  if config.auth_mode not in AUTH_MODES:
+    # argparse enforces this for --AuthMode, but BC_AUTH_MODE bypasses it.
+    sys.stderr.write(
+        f"ERROR: invalid auth mode {config.auth_mode!r}. "
+        f"Expected one of: {', '.join(AUTH_MODES)}.\n")
     sys.exit(2)
   run_sync(config)
 
@@ -116,6 +129,7 @@ def _config_from_env() -> dict[str, Optional[str]]:
       "sse_timeout_seconds": os.getenv("BC_SSE_TIMEOUT_SECONDS"),
       "device_cache_location": os.getenv("BC_DEVICE_CACHE_LOCATION"),
       "device_cache_name": os.getenv("BC_DEVICE_CACHE_NAME"),
+      "auth_mode": os.getenv("BC_AUTH_MODE"),
       "log_level": os.getenv("BC_LOG_LEVEL"),
   }
 

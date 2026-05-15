@@ -110,10 +110,17 @@ In the Azure portal:
 
 Then in the same app:
 
-6. **Authentication** → **Add a platform** → **Mobile and desktop applications** → enter:
-   ```
-   ms-appx-web://Microsoft.AAD.BrokerPlugin/<your-client-id>
-   ```
+6. **Authentication** → **Add a platform** → **Mobile and desktop applications**, then:
+   - **Tick the `http://localhost` checkbox.** *(Required.)* The proxy signs you
+     in with an interactive browser flow that redirects back to a localhost
+     loopback listener — Microsoft Entra allows any port on `http://localhost`
+     for public clients, so the checkbox is all you need (no port to specify).
+     Without this you'll get `AADSTS500113`/`AADSTS50011` and the proxy falls
+     back to the slower device-code flow.
+   - Also add the custom redirect URI (used by the device-code fallback):
+     ```
+     ms-appx-web://Microsoft.AAD.BrokerPlugin/<your-client-id>
+     ```
 7. Lower on the same page: set **"Allow public client flows"** to **Yes**, save.
 
 Permissions:
@@ -219,14 +226,32 @@ python -m bc_mcp_proxy setup
 
 ### Step 6 — First sign-in
 
-The very first tool call walks the **device code flow**:
+On first use the proxy opens your **default browser** to the normal Microsoft
+sign-in page (interactive auth-code flow with a localhost loopback redirect).
+Sign in with the Azure account that has the BC permissions — no code to copy,
+nothing to read out of the logs. The token is then cached locally (via
+`msal-extensions` with platform-specific secure storage); subsequent runs are
+non-interactive until expiry, at which point the proxy refreshes silently using
+the refresh token.
+
+Discovery is **non-blocking**: if the client asks for the tool list before
+you've finished signing in, the proxy returns an empty list immediately and
+then pushes `notifications/tools/list_changed` the moment authentication
+completes, so the tools appear without restarting anything. (This is why the
+client no longer has to be restarted after the first sign-in.)
+
+If no browser is available (headless box, locked-down VM) the proxy
+automatically falls back to the **device-code flow**:
 
 ```
 To sign in, use a web browser to open https://microsoft.com/devicelogin
 and enter the code ABCD-1234 to authenticate.
 ```
 
-Open the URL, paste the code, sign in with the Azure account that has the BC permissions. Your token is then cached locally (via `msal-extensions` with platform-specific secure storage). Subsequent runs are non-interactive until expiry — at which point the proxy refreshes silently using the refresh token.
+You can force a specific method with `--AuthMode` / `BC_AUTH_MODE`
+(`auto` — default, interactive then device-code fallback; `interactive`;
+`device_code`). Use `device_code` for headless/server installs where opening a
+browser on the host is undesirable.
 
 ---
 
@@ -292,7 +317,8 @@ The very first install on a freshly cold-started BC environment may still hit th
 | Environment         | `--Environment`        | `BC_ENVIRONMENT`         | `Production`                                                  |
 | Company             | `--Company`            | `BC_COMPANY`             | *required*                                                    |
 | Configuration Name  | `--ConfigurationName`  | `BC_CONFIGURATION_NAME`  | unset                                                         |
-| Custom Auth Header  | `--CustomAuthHeader`   | `BC_CUSTOM_AUTH_HEADER`  | unset (skips device flow when provided)                       |
+| Custom Auth Header  | `--CustomAuthHeader`   | `BC_CUSTOM_AUTH_HEADER`  | unset (skips interactive/device flow when provided)           |
+| Auth Mode           | `--AuthMode`           | `BC_AUTH_MODE`           | `auto` (`auto` \| `interactive` \| `device_code`)             |
 | Base URL            | `--BaseUrl`            | `BC_BASE_URL`            | `https://mcp.businesscentral.dynamics.com` (v28)              |
 | Token Scope         | `--TokenScope`         | `BC_TOKEN_SCOPE`         | auto-picked from base URL host (v28 → v28 scope, v27 → v27 scope) |
 | HTTP Timeout (s)    | `--HttpTimeoutSeconds` | `BC_HTTP_TIMEOUT_SECONDS`| `120.0`                                                       |
@@ -311,7 +337,7 @@ Token cache locations (when no custom auth header is supplied):
 ## Troubleshooting
 
 - **`The MCP Configuration named X was not found or not active`.** Open the configuration in BC and verify the **Active** toggle is on. Saving the page does not flip Active automatically. The error also fires when the `ConfigurationName` header value differs from the BC record by even a trailing space.
-- **Authentication failures.** Verify the redirect URL format (`ms-appx-web://Microsoft.AAD.BrokerPlugin/<clientID>`) and that *"Allow public client flows"* is enabled on the Azure app registration; ensure all API permissions are granted (and admin-consented where required); rerun setup if the device flow times out.
+- **Authentication failures.** `AADSTS500113` / `AADSTS50011` (no reply address / redirect URI mismatch) means the **`http://localhost` redirect URI is not registered** under *Authentication → Mobile and desktop applications* — add it (see [Step 1](#step-1--azure-app-registration)). The proxy names this exact fix in its error message and falls back to device-code in `auto` mode. Otherwise verify *"Allow public client flows"* is **Yes**, the `ms-appx-web://Microsoft.AAD.BrokerPlugin/<clientID>` redirect URI is present, all API permissions are granted (and admin-consented where required), and rerun setup if device-code times out. For headless/server hosts where no browser can open, set `--AuthMode device_code` (or `BC_AUTH_MODE=device_code`).
 - **Calls hang or time out (especially in Dynamic Tool Mode).** The first `bc_actions_search` against a configuration with *Discover Additional Objects* enabled enumerates the entire metadata catalog — measured at 50–60s server-side on a Cronus demo. Raise `BC_HTTP_TIMEOUT_SECONDS` (default 120) if you see `httpx.ReadTimeout` on the first call. Subsequent calls within the same session are typically sub-second.
 - **JSON-RPC `-32603 "An error occurred."` with no detail.** This is BC's catch-all when something inside a dynamic-tool call goes wrong. The actual reason is logged to Azure Application Insights as event `RT0054` with custom dimension `toolInvocationFailureReason`. Enable telemetry on the BC environment and query (`traces | where customDimensions.eventId == 'RT0054' | where customDimensions.toolInvocationResult == 'Failure'`) to see what BC actually rejected.
 - **Frequent reconnects in logs.** Inspect upstream availability — the proxy logs `Upstream connection error (...); reconnecting in Xs (attempt N/M)` whenever it retries. After the configured budget the proxy gives up and the local stdio pipe closes.
