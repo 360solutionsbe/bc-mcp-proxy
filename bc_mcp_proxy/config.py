@@ -108,7 +108,7 @@ class ProxyConfig:
   """Configuration values required to run the Business Central MCP proxy."""
 
   server_name: str = "BcMCPProxyPython"
-  server_version: str = "0.5.4"
+  server_version: str = "0.5.5"
   instructions: Optional[str] = None
 
   tenant_id: Optional[str] = None
