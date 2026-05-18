@@ -4,7 +4,6 @@ import asyncio
 import logging
 import time
 from typing import Any, Awaitable, Callable, Optional
-from urllib.parse import unquote
 
 import httpx
 from mcp.client.session import ClientSession
@@ -13,7 +12,13 @@ from mcp.server import Server
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
-from mcp.types import CallToolResult, Implementation, ListToolsResult
+from mcp.types import (
+    INTERNAL_ERROR,
+    CallToolResult,
+    ErrorData,
+    Implementation,
+    ListToolsResult,
+)
 
 import os
 
@@ -136,6 +141,45 @@ def _exception_hints_at_client_cancel(exc: BaseException) -> bool:
     if isinstance(leaf, httpx.RemoteProtocolError):
       return True
   return False
+
+
+def _permanent_upstream_status(exc: BaseException) -> Optional[int]:
+  """If `exc` carries an httpx 4xx (other than 429), return that status.
+
+  A 4xx from Business Central means the request/config/permissions are
+  wrong — not a transient blip. Retrying or letting the process crash so
+  Claude Desktop respawns it just produces a tight crash-loop into the
+  same failure. 429 is excluded: rate limiting is transient and stays on
+  the normal recoverable path. The transport wraps errors in an anyio
+  ExceptionGroup, so walk every leaf.
+  """
+  for leaf in _iter_leaf_exceptions(exc):
+    if isinstance(leaf, httpx.HTTPStatusError):
+      status = getattr(leaf.response, "status_code", None)
+      if isinstance(status, int) and 400 <= status < 500 and status != 429:
+        return status
+  return None
+
+
+def _format_upstream_rejection(status: int, config: ProxyConfig) -> str:
+  """A single actionable line for a permanent BC rejection — no traceback.
+
+  The token is valid by the time the request is sent (auth happens first),
+  so a 4xx is almost always Environment/ConfigurationName/Company/access,
+  not sign-in. Echo the effective values so the fix is obvious from the log.
+  """
+  return (
+      f"Business Central rejected the connection with HTTP {status}. "
+      "Your sign-in worked — this is a configuration or permission issue, "
+      "not authentication. Check these against the BC admin center: the "
+      "Environment name (exact, case-sensitive), the MCP Configuration Name "
+      "(required when a named MCP configuration exists — and easy to leave "
+      "blank in the extension settings), the Company name, and that the "
+      "signed-in account has access to that environment/configuration. "
+      f"Effective config: environment={config.environment!r} "
+      f"company={config.company!r} "
+      f"configuration_name={config.configuration_name or '<not set>'!r}."
+  )
 
 
 def _detect_masked_error(result: CallToolResult) -> Optional[str]:
@@ -274,6 +318,19 @@ class _UpstreamSessionHolder:
     self._session: Optional[ClientSession] = None
     self._get_session_id: Optional[Callable[[], Optional[str]]] = None
     self._ready = asyncio.Event()
+    # Set once the upstream has permanently failed (a 4xx that won't fix
+    # itself this process). Sticky: never cleared, so waiters surface it
+    # instead of hanging forever or crash-looping.
+    self._fatal: Optional[McpError] = None
+
+  @property
+  def fatal(self) -> Optional[McpError]:
+    return self._fatal
+
+  def set_fatal(self, error: McpError) -> None:
+    self._fatal = error
+    # Wake any wait_active() waiters so they raise the error promptly.
+    self._ready.set()
 
   def set_session(
       self,
@@ -291,6 +348,8 @@ class _UpstreamSessionHolder:
 
   async def wait_active(self) -> ClientSession:
     while True:
+      if self._fatal is not None:
+        raise self._fatal
       if self._session is not None:
         return self._session
       await self._ready.wait()
@@ -366,6 +425,21 @@ class _UpstreamConnectionManager:
         self.state.clear_session()
         raise
       except BaseException as exc:
+        permanent_status = _permanent_upstream_status(exc)
+        if permanent_status is not None:
+          # BC rejected us with a 4xx. Don't crash (Claude Desktop would
+          # just respawn into the same failure) and don't retry (config
+          # won't change mid-process). Log ONE actionable line, record a
+          # sticky fatal so the stdio handlers surface it to the client,
+          # and park so the local server keeps serving until the client
+          # disconnects (which cancels this task).
+          self.state.clear_session()
+          message = _format_upstream_rejection(permanent_status, self.config)
+          self.logger.error(message)
+          self.state.set_fatal(
+              McpError(ErrorData(code=INTERNAL_ERROR, message=message)))
+          await asyncio.Event().wait()
+          return  # pragma: no cover - only on cancellation, which re-raises
         if not _is_recoverable_upstream_error(exc):
           self.state.clear_session()
           raise
@@ -522,6 +596,13 @@ async def run_proxy(config: ProxyConfig) -> None:
     except LookupError:  # pragma: no cover - defensive; always in a request here
       pass
 
+    fatal = state.fatal
+    if fatal is not None:
+      # Upstream permanently rejected us (4xx). Surface the actionable
+      # error rather than an empty or stale list the user can't act on.
+      logger.debug("Surfacing fatal upstream error on tools/list")
+      raise fatal
+
     fresh = cache.get_fresh()
     if fresh is not None:
       logger.debug("Serving tools/list from cache")
@@ -654,10 +735,16 @@ def _build_transport_headers(config: ProxyConfig) -> dict[str, str]:
   headers: dict[str, str] = {
       "X-Client-Application": config.server_name,
   }
+  # Use the configured values literally (stripped), consistent with
+  # tenant_id/environment below. The upstream Microsoft sample ran these
+  # through urllib.parse.unquote, which silently corrupts any name
+  # containing '%' or '+' (e.g. "R&D %1" or "A+B Ltd") — our config comes
+  # from .dxt fields / CLI / env entered verbatim, never URL-encoded, so
+  # decoding was wrong for this input model.
   if config.company:
-    headers["Company"] = unquote(config.company).strip()
+    headers["Company"] = config.company.strip()
   if config.configuration_name:
-    headers["ConfigurationName"] = unquote(config.configuration_name).strip()
+    headers["ConfigurationName"] = config.configuration_name.strip()
   if is_v28_endpoint(config.base_url):
     # The v28 host requires routing info in headers because the URL no
     # longer carries the environment in its path. .strip() here is

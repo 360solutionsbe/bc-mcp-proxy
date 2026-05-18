@@ -127,3 +127,20 @@ def test_v28_headers_preserve_internal_whitespace() -> None:
   h = _build_transport_headers(cfg)
   assert h["Company"] == "CRONUS USA"
   assert h["ConfigurationName"] == "My MCP Configuration"
+
+
+def test_company_and_configuration_name_are_not_url_decoded() -> None:
+  """Values are sent literally. The upstream sample ran these through
+  urllib.parse.unquote, which silently corrupts any name containing
+  '%' or '+' — our config is entered verbatim, never URL-encoded."""
+  cfg = ProxyConfig(
+      base_url="https://mcp.businesscentral.dynamics.com",
+      tenant_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      environment="Production",
+      company="R&D %1 + Co",
+      configuration_name="Cfg %2B name+",
+  )
+  h = _build_transport_headers(cfg)
+  # unquote() would have turned "%1"/"%2B"/"+" into other characters.
+  assert h["Company"] == "R&D %1 + Co"
+  assert h["ConfigurationName"] == "Cfg %2B name+"
