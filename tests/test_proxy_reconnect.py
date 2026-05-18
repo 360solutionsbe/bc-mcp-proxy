@@ -9,14 +9,26 @@ from typing import Optional
 import httpx
 import pytest
 
+from mcp.shared.exceptions import McpError
+from mcp.types import INTERNAL_ERROR, ErrorData
+
 from bc_mcp_proxy.config import ProxyConfig
 from bc_mcp_proxy.proxy import (
     _BaseExceptionGroup,
     _backoff_for_attempt,
+    _format_upstream_rejection,
     _is_recoverable_upstream_error,
+    _permanent_upstream_status,
     _UpstreamConnectionManager,
     _UpstreamSessionHolder,
 )
+
+
+def _http_status_error(status: int) -> httpx.HTTPStatusError:
+  request = httpx.Request("POST", "https://mcp.businesscentral.dynamics.com")
+  response = httpx.Response(status, request=request)
+  return httpx.HTTPStatusError(
+      f"{status}", request=request, response=response)
 
 
 # -- Recoverable error classification ----------------------------------------
@@ -117,6 +129,10 @@ class _FakeManager(_UpstreamConnectionManager):
       return
     if action == "fail-non-recoverable":
       raise ValueError("not a transient error")
+    if action == "fail-400":
+      raise _http_status_error(400)
+    if action == "fail-400-grouped":
+      raise _BaseExceptionGroup("wrapped", [_http_status_error(400)])
     raise AssertionError(f"Unknown action: {action}")
 
 
@@ -253,3 +269,92 @@ async def test_holder_clear_makes_subsequent_waiters_block() -> None:
 
   with pytest.raises(asyncio.TimeoutError):
     await asyncio.wait_for(state.wait_active(), timeout=0.05)
+
+
+# -- Permanent 4xx: stay-alive + clean error ---------------------------------
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 405])
+def test_4xx_is_permanent(status: int) -> None:
+  assert _permanent_upstream_status(_http_status_error(status)) == status
+
+
+def test_permanent_status_unwraps_exception_group() -> None:
+  eg = _BaseExceptionGroup("wrapped", [_http_status_error(400)])
+  assert _permanent_upstream_status(eg) == 400
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_429_and_5xx_are_not_permanent(status: int) -> None:
+  # 429 = transient rate limit; 5xx = server-side. Both stay off this path.
+  assert _permanent_upstream_status(_http_status_error(status)) is None
+
+
+def test_non_http_errors_are_not_permanent() -> None:
+  assert _permanent_upstream_status(httpx.ReadTimeout("stall")) is None
+  assert _permanent_upstream_status(ValueError("boom")) is None
+
+
+def test_rejection_message_is_actionable() -> None:
+  cfg = ProxyConfig(environment="Sandbox", company="CRONUS BE",
+                     configuration_name="Demo MCP")
+  msg = _format_upstream_rejection(400, cfg)
+  assert "HTTP 400" in msg
+  assert "Configuration Name" in msg  # points at the most common cause
+  assert "'Sandbox'" in msg and "'CRONUS BE'" in msg and "'Demo MCP'" in msg
+  assert "authentication" in msg.lower()  # clarifies it's NOT a sign-in problem
+
+
+def test_rejection_message_marks_unset_configuration_name() -> None:
+  cfg = ProxyConfig(environment="Production", company="X",
+                     configuration_name=None)
+  assert "<not set>" in _format_upstream_rejection(404, cfg)
+
+
+async def test_wait_active_raises_recorded_fatal() -> None:
+  state = _UpstreamSessionHolder()
+  err = McpError(ErrorData(code=INTERNAL_ERROR, message="BC rejected: HTTP 400"))
+  state.set_fatal(err)
+
+  with pytest.raises(McpError) as excinfo:
+    await asyncio.wait_for(state.wait_active(), timeout=0.5)
+  assert excinfo.value is err
+  # Sticky: a later session does not override the fatal.
+  state.set_session(object(), lambda: "s")  # type: ignore[arg-type]
+  with pytest.raises(McpError):
+    await state.wait_active()
+
+
+async def test_permanent_4xx_parks_alive_and_records_fatal() -> None:
+  mgr, sleeps = _build_manager(["fail-400"])
+  task = asyncio.create_task(mgr.run())
+  try:
+    for _ in range(100):
+      if mgr.state.fatal is not None:
+        break
+      await asyncio.sleep(0)
+    assert mgr.state.fatal is not None, "fatal error was not recorded"
+    assert "HTTP 400" in mgr.state.fatal.error.message
+    await asyncio.sleep(0)
+    assert not task.done(), "run() must stay parked, not exit/crash"
+    assert sleeps == [], "permanent 4xx must not retry/backoff"
+  finally:
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+      await task
+
+
+async def test_permanent_4xx_grouped_also_parks() -> None:
+  mgr, _ = _build_manager(["fail-400-grouped"])
+  task = asyncio.create_task(mgr.run())
+  try:
+    for _ in range(100):
+      if mgr.state.fatal is not None:
+        break
+      await asyncio.sleep(0)
+    assert mgr.state.fatal is not None
+    assert not task.done()
+  finally:
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+      await task
