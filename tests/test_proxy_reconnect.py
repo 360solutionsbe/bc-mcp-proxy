@@ -18,8 +18,10 @@ from bc_mcp_proxy.proxy import (
     _backoff_for_attempt,
     _format_upstream_rejection,
     _is_recoverable_upstream_error,
+    _permanent_rejection_reason,
     _permanent_upstream_status,
     _UpstreamConnectionManager,
+    _UpstreamConnectRejected,
     _UpstreamSessionHolder,
 )
 
@@ -133,6 +135,10 @@ class _FakeManager(_UpstreamConnectionManager):
       raise _http_status_error(400)
     if action == "fail-400-grouped":
       raise _BaseExceptionGroup("wrapped", [_http_status_error(400)])
+    if action == "fail-connect-rejected":
+      # Mirrors _open_and_serve converting an McpError at initialize().
+      raise _BaseExceptionGroup(
+          "wrapped", [_UpstreamConnectRejected("Session terminated")])
     raise AssertionError(f"Unknown action: {action}")
 
 
@@ -298,7 +304,7 @@ def test_non_http_errors_are_not_permanent() -> None:
 def test_rejection_message_is_actionable() -> None:
   cfg = ProxyConfig(environment="Sandbox", company="CRONUS BE",
                      configuration_name="Demo MCP")
-  msg = _format_upstream_rejection(400, cfg)
+  msg = _format_upstream_rejection("HTTP 400", cfg)
   assert "HTTP 400" in msg
   assert "Configuration Name" in msg  # points at the most common cause
   assert "'Sandbox'" in msg and "'CRONUS BE'" in msg and "'Demo MCP'" in msg
@@ -308,7 +314,55 @@ def test_rejection_message_is_actionable() -> None:
 def test_rejection_message_marks_unset_configuration_name() -> None:
   cfg = ProxyConfig(environment="Production", company="X",
                      configuration_name=None)
-  assert "<not set>" in _format_upstream_rejection(404, cfg)
+  assert "<not set>" in _format_upstream_rejection("HTTP 404", cfg)
+
+
+# -- Permanent rejection reason (4xx OR 404-as-session-terminated) -----------
+
+
+def test_rejection_reason_for_httpx_4xx() -> None:
+  assert _permanent_rejection_reason(_http_status_error(400)) == "HTTP 400"
+  eg = _BaseExceptionGroup("wrapped", [_http_status_error(401)])
+  assert _permanent_rejection_reason(eg) == "HTTP 401"
+
+
+def test_rejection_reason_for_connect_rejected() -> None:
+  # What _open_and_serve raises when initialize() returns an McpError.
+  reason = _permanent_rejection_reason(_UpstreamConnectRejected("Session terminated"))
+  assert reason is not None and "404" in reason
+
+
+def test_rejection_reason_for_session_terminated_mcperror() -> None:
+  # Defensive: a bare session-terminated McpError leaf is also permanent.
+  err = McpError(ErrorData(code=32600, message="Session terminated"))
+  reason = _permanent_rejection_reason(_BaseExceptionGroup("g", [err]))
+  assert reason is not None and "404" in reason
+
+
+def test_rejection_reason_none_for_transient() -> None:
+  assert _permanent_rejection_reason(httpx.ReadTimeout("stall")) is None
+  assert _permanent_rejection_reason(_http_status_error(429)) is None
+
+
+async def test_connect_rejected_parks_alive_and_records_fatal() -> None:
+  """A 404-style connect rejection (McpError at initialize) must behave
+  exactly like a 400: clean error, stay alive, no crash-loop."""
+  mgr, sleeps = _build_manager(["fail-connect-rejected"])
+  task = asyncio.create_task(mgr.run())
+  try:
+    for _ in range(100):
+      if mgr.state.fatal is not None:
+        break
+      await asyncio.sleep(0)
+    assert mgr.state.fatal is not None, "fatal not recorded for connect rejection"
+    assert "404" in mgr.state.fatal.error.message
+    await asyncio.sleep(0)
+    assert not task.done(), "run() must stay parked, not crash"
+    assert sleeps == [], "permanent rejection must not retry/backoff"
+  finally:
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+      await task
 
 
 async def test_wait_active_raises_recorded_fatal() -> None:

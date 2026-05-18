@@ -62,6 +62,16 @@ class _UpstreamSessionExpiredError(Exception):
   again — which mints a new session_id and (via _AsyncBearerAuth) asks MSAL
   for a fresh access token."""
 
+
+class _UpstreamConnectRejected(Exception):
+  """BC refused the initial handshake itself (raised from initialize()).
+
+  A 404 on the connect POST is mapped by the MCP client lib to
+  McpError("Session terminated") rather than an httpx.HTTPStatusError, so
+  it must be intercepted here and treated as a *permanent* rejection (wrong
+  Environment / ConfigurationName / no access) — not the transient
+  mid-session "session terminated" that the reconnect path handles."""
+
 # Substrings that indicate the upstream returned an error message inside a
 # successful (isError=False) response. Match is case-insensitive.
 _MASKED_ERROR_PATTERNS: tuple[str, ...] = (
@@ -161,15 +171,40 @@ def _permanent_upstream_status(exc: BaseException) -> Optional[int]:
   return None
 
 
-def _format_upstream_rejection(status: int, config: ProxyConfig) -> str:
+def _permanent_rejection_reason(exc: BaseException) -> Optional[str]:
+  """Human reason if `exc` is a permanent BC rejection, else None.
+
+  Two shapes, both meaning "your routing/config/permissions are wrong, this
+  won't fix itself this process":
+    * an httpx 4xx (≠429) — e.g. a wrong ConfigurationName yields HTTP 400;
+    * `_UpstreamConnectRejected` / an McpError("Session terminated") raised
+      from the initial handshake — a wrong Environment yields HTTP 404,
+      which the MCP client lib reports as a terminated session, not a 4xx.
+  """
+  status = _permanent_upstream_status(exc)
+  if status is not None:
+    return f"HTTP {status}"
+  for leaf in _iter_leaf_exceptions(exc):
+    if isinstance(leaf, _UpstreamConnectRejected):
+      return ("the connection was not established (commonly HTTP 404 — the "
+              "Environment or MCP Configuration was not found, or the "
+              "account lacks access)")
+    if _is_session_terminated_error(leaf):
+      return ("the session was rejected at connect (commonly HTTP 404 — the "
+              "Environment or MCP Configuration was not found, or the "
+              "account lacks access)")
+  return None
+
+
+def _format_upstream_rejection(reason: str, config: ProxyConfig) -> str:
   """A single actionable line for a permanent BC rejection — no traceback.
 
   The token is valid by the time the request is sent (auth happens first),
-  so a 4xx is almost always Environment/ConfigurationName/Company/access,
+  so this is almost always Environment/ConfigurationName/Company/access,
   not sign-in. Echo the effective values so the fix is obvious from the log.
   """
   return (
-      f"Business Central rejected the connection with HTTP {status}. "
+      f"Business Central rejected the connection ({reason}). "
       "Your sign-in worked — this is a configuration or permission issue, "
       "not authentication. Check these against the BC admin center: the "
       "Environment name (exact, case-sensitive), the MCP Configuration Name "
@@ -425,16 +460,17 @@ class _UpstreamConnectionManager:
         self.state.clear_session()
         raise
       except BaseException as exc:
-        permanent_status = _permanent_upstream_status(exc)
-        if permanent_status is not None:
-          # BC rejected us with a 4xx. Don't crash (Claude Desktop would
-          # just respawn into the same failure) and don't retry (config
-          # won't change mid-process). Log ONE actionable line, record a
-          # sticky fatal so the stdio handlers surface it to the client,
-          # and park so the local server keeps serving until the client
-          # disconnects (which cancels this task).
+        rejection = _permanent_rejection_reason(exc)
+        if rejection is not None:
+          # BC permanently rejected us (4xx, or a 404 surfaced as a
+          # terminated session at connect). Don't crash (Claude Desktop
+          # would just respawn into the same failure) and don't retry
+          # (config won't change mid-process). Log ONE actionable line,
+          # record a sticky fatal so the stdio handlers surface it to the
+          # client, and park so the local server keeps serving until the
+          # client disconnects (which cancels this task).
           self.state.clear_session()
-          message = _format_upstream_rejection(permanent_status, self.config)
+          message = _format_upstream_rejection(rejection, self.config)
           self.logger.error(message)
           self.state.set_fatal(
               McpError(ErrorData(code=INTERNAL_ERROR, message=message)))
@@ -487,7 +523,18 @@ class _UpstreamConnectionManager:
           remote_write,
           client_info=client_info,
       ) as remote_session:
-        init_result = await remote_session.initialize()
+        try:
+          init_result = await remote_session.initialize()
+        except McpError as exc:
+          # A failure during the initial handshake means BC refused the
+          # connection itself — most often a 404 (wrong Environment / MCP
+          # configuration / no access) which the client lib reports as
+          # "Session terminated". Convert it so run() classifies it as a
+          # permanent rejection (clean error + stay alive) instead of a
+          # crash-loop. This is connect-time only — the mid-session
+          # terminate is handled by _invoke_with_session_recovery and
+          # never reaches here.
+          raise _UpstreamConnectRejected(str(exc)) from exc
         self.logger.debug(
             "Connected to remote MCP server (protocol %s)",
             init_result.protocolVersion,
