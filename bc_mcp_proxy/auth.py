@@ -175,8 +175,8 @@ class MsalDeviceCodeTokenProvider(TokenProvider):
       raise _InteractiveAuthError(
           "the Azure app registration is missing a redirect URI for the "
           "interactive sign-in. In Microsoft Entra ID, open the app "
-          f"registration (client id {self._client_id}) → Authentication → "
-          "Add a platform → 'Mobile and desktop applications' → check "
+          f"registration (client id {self._client_id}) -> Authentication -> "
+          "Add a platform -> 'Mobile and desktop applications' -> check "
           "'http://localhost'. Underlying AAD error: " + desc)
     raise _InteractiveAuthError(f"interactive sign-in returned no token: {desc}")
 

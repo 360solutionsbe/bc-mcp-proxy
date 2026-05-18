@@ -22,7 +22,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def run_interactive_setup() -> None:
   """Run the interactive setup wizard."""
-  print("Business Central MCP Proxy – Setup Wizard")
+  print("Business Central MCP Proxy - Setup Wizard")
   print("-----------------------------------------\n")
 
   config = collect_configuration()
@@ -195,9 +195,9 @@ def print_next_steps(config: ProxyConfig, cursor_url: str, vscode_url: str) -> N
 
   print("\nSetup complete! Next steps:")
   print("1) Add the MCP server to your preferred client:")
-  print(f"   • Cursor: {cursor_url}")
-  print(f"   • VS Code: {vscode_url}")
-  print("   • Claude Desktop: see claude_mcp.json in your configuration folder.\n")
+  print(f"   - Cursor: {cursor_url}")
+  print(f"   - VS Code: {vscode_url}")
+  print("   - Claude Desktop: see claude_mcp.json in your configuration folder.\n")
 
   print("2) Start the proxy whenever you want to use it:")
   print(f"   {command_preview}\n")

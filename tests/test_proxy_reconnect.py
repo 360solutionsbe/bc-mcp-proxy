@@ -344,6 +344,21 @@ def test_rejection_reason_none_for_transient() -> None:
   assert _permanent_rejection_reason(_http_status_error(429)) is None
 
 
+def test_rejection_messages_are_ascii_only() -> None:
+  """The headline diagnostic is written to stderr and read by users on
+  Windows consoles (cp1252). Non-ASCII (em-dashes, arrows) mojibakes to
+  '?' there and can even raise UnicodeEncodeError. Keep it ASCII."""
+  cfg = ProxyConfig(environment="Sandbox", company="CRONUS BE",
+                     configuration_name="Demo MCP")
+  msg = _format_upstream_rejection("HTTP 400", cfg)
+  assert msg.isascii(), msg
+  for exc in (_UpstreamConnectRejected("x"),
+              McpError(ErrorData(code=32600, message="Session terminated"))):
+    reason = _permanent_rejection_reason(_BaseExceptionGroup("g", [exc]))
+    assert reason is not None and reason.isascii(), reason
+    assert _format_upstream_rejection(reason, cfg).isascii()
+
+
 async def test_connect_rejected_parks_alive_and_records_fatal() -> None:
   """A 404-style connect rejection (McpError at initialize) must behave
   exactly like a 400: clean error, stay alive, no crash-loop."""
