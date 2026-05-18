@@ -186,11 +186,11 @@ def _permanent_rejection_reason(exc: BaseException) -> Optional[str]:
     return f"HTTP {status}"
   for leaf in _iter_leaf_exceptions(exc):
     if isinstance(leaf, _UpstreamConnectRejected):
-      return ("the connection was not established (commonly HTTP 404 — the "
+      return ("the connection was not established (commonly HTTP 404 -- the "
               "Environment or MCP Configuration was not found, or the "
               "account lacks access)")
     if _is_session_terminated_error(leaf):
-      return ("the session was rejected at connect (commonly HTTP 404 — the "
+      return ("the session was rejected at connect (commonly HTTP 404 -- the "
               "Environment or MCP Configuration was not found, or the "
               "account lacks access)")
   return None
@@ -205,10 +205,10 @@ def _format_upstream_rejection(reason: str, config: ProxyConfig) -> str:
   """
   return (
       f"Business Central rejected the connection ({reason}). "
-      "Your sign-in worked — this is a configuration or permission issue, "
+      "Your sign-in worked -- this is a configuration or permission issue, "
       "not authentication. Check these against the BC admin center: the "
       "Environment name (exact, case-sensitive), the MCP Configuration Name "
-      "(required when a named MCP configuration exists — and easy to leave "
+      "(required when a named MCP configuration exists -- and easy to leave "
       "blank in the extension settings), the Company name, and that the "
       "signed-in account has access to that environment/configuration. "
       f"Effective config: environment={config.environment!r} "
@@ -492,7 +492,7 @@ class _UpstreamConnectionManager:
             self._attempt - 1, self.base_backoff, self.max_backoff,
         )
         hint = (
-            " — possible client-side cancellation"
+            " -- possible client-side cancellation"
             if _exception_hints_at_client_cancel(exc) else ""
         )
         self.logger.warning(

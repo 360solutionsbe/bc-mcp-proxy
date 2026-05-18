@@ -162,7 +162,7 @@ def _clean(key: str, value: str) -> str:
   if stripped != value:
     logging.getLogger("bc_mcp_proxy").warning(
         "Stripped surrounding whitespace from %s (check the env var or "
-        "CLI argument — pasted values sometimes carry stray spaces).", key,
+        "CLI argument -- pasted values sometimes carry stray spaces).", key,
     )
   return stripped
 
