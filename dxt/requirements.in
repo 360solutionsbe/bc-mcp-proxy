@@ -14,7 +14,7 @@
 # Snyk's static resolver and pip's install-time resolver.
 
 # --- Direct runtime dependencies ----------------------------------------------
-mcp>=1.21.0
+mcp>=1.27.1
 httpx>=0.28.0
 msal>=1.34.0
 msal-extensions>=1.3.0
