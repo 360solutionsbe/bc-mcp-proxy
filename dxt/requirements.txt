@@ -72,7 +72,7 @@ pydantic-core==2.46.4
     # via pydantic
 pydantic-settings==2.14.0
     # via mcp
-pyjwt==2.12.1
+pyjwt==2.13.0
     # via
     #   -r requirements.in
     #   mcp
@@ -81,7 +81,7 @@ python-dotenv==1.2.2
     # via
     #   -r requirements.in
     #   pydantic-settings
-python-multipart==0.0.27
+python-multipart==0.0.29
     # via
     #   -r requirements.in
     #   mcp
@@ -89,7 +89,7 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.33.1
+requests==2.34.2
     # via
     #   -r requirements.in
     #   msal
@@ -99,7 +99,7 @@ rpds-py==0.30.0
     #   referencing
 sse-starlette==3.4.1
     # via mcp
-starlette==1.0.0
+starlette==1.1.0
     # via
     #   -r requirements.in
     #   mcp
