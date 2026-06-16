@@ -72,7 +72,7 @@ pydantic-core==2.46.4
     # via pydantic
 pydantic-settings==2.14.0
     # via mcp
-pyjwt==2.12.1
+pyjwt==2.13.0
     # via
     #   -r requirements.in
     #   mcp
