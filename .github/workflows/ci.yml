@@ -63,3 +63,84 @@ jobs:
 
       - name: Audit runtime dependencies
         run: pip-audit --strict --progress-spinner off --requirement requirements-runtime.txt
+
+  bundle-resolution:
+    # Resolves dxt/requirements.txt exactly the way dxt/build.{sh,ps1} vendor
+    # wheels, for every ABI in the bundle matrix, without downloading anything.
+    #
+    # This exists because a lockfile can be perfectly installable on the CI
+    # runner and still break the release: v0.5.7's first attempt failed on all
+    # three platforms because rpds-py had moved to requires-python >=3.11 while
+    # the bundle still vendors a cp310 wheel set. pip-compile resolves against
+    # whatever interpreter it runs on, so nothing upstream of here catches that.
+    #
+    # Runs on the same host OS as the matching release build, because pip
+    # evaluates environment markers (sys_platform, platform_system) against the
+    # host rather than --platform.
+    name: .dxt bundle resolves (${{ matrix.platform_tag }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            pip_platform: manylinux2014_x86_64
+            platform_tag: linux-x86_64
+          - os: macos-latest
+            pip_platform: macosx_11_0_arm64
+            platform_tag: darwin-arm64
+          - os: windows-latest
+            pip_platform: win_amd64
+            platform_tag: win-amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Resolve the lockfile for every bundled ABI
+        shell: bash
+        run: |
+          failed=0
+          for abi in 310 311 312 313 314; do
+            py="3.${abi:1}"
+            echo "::group::cp$abi (Python $py) / ${{ matrix.pip_platform }}"
+            if python -m pip install --dry-run \
+                 --target "$RUNNER_TEMP/resolve-cp$abi" \
+                 --upgrade \
+                 --no-compile \
+                 --python-version "$py" \
+                 --only-binary ':all:' \
+                 --platform "${{ matrix.pip_platform }}" \
+                 -r dxt/requirements.txt; then
+              echo "cp$abi OK"
+            else
+              echo "::error::dxt/requirements.txt has no installable wheel set for Python $py on ${{ matrix.pip_platform }} — the .dxt build for this ABI would fail at release time."
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $failed
+
+  lockfile-portability:
+    # Snyk's requirements.txt scanner does not evaluate environment markers: it
+    # looks for every listed package in the installed environment and aborts the
+    # whole scan with "Missing required packages" when one is absent. A lockfile
+    # compiled on Windows carries platform-gated entries (pywin32, colorama)
+    # that pip correctly skips on Linux, which is enough to break the Snyk job.
+    # Compile the lockfile on Linux; this check catches it if someone doesn't.
+    name: lockfile has no platform-gated pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject platform markers in dxt/requirements.txt
+        run: |
+          if grep -nE '^[^#].*;.*(sys_platform|platform_system|platform_machine)' dxt/requirements.txt; then
+            echo "::error::The lines above are platform-gated pins. Snyk ignores environment markers and will fail the Open Source scan with 'Missing required packages'. Regenerate the lockfile on Linux (see the header of dxt/requirements.in)."
+            exit 1
+          fi
+          echo "No platform-gated pins."
