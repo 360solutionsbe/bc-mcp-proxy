@@ -12,6 +12,13 @@
 # The lockfile is what Snyk scans (and what the build script vendors into
 # the .dxt). Pinning every transitive eliminates the discrepancy between
 # Snyk's static resolver and pip's install-time resolver.
+#
+# COMPILE THE LOCKFILE ON LINUX. pip-compile resolves against the OS it runs
+# on, so a Windows run adds Windows-only entries (pywin32, colorama). pip
+# skips those on Linux via their markers, but Snyk's requirements.txt scanner
+# ignores environment markers and fails the whole scan with "Missing required
+# packages". A Linux-compiled lockfile omits them entirely, and the Windows
+# .dxt build still picks them up as ordinary unpinned transitives.
 
 # --- Direct runtime dependencies ----------------------------------------------
 # mcp is capped below 2.0.0: the 2.x line drops the APIs this proxy builds on
@@ -30,12 +37,6 @@ exceptiongroup>=1.2.0; python_version < "3.11"
 # in the generated lockfile — without it, CI on Ubuntu fails to install
 # the lockfile because pywin32 has no Linux wheels.
 pywin32; sys_platform == "win32"
-
-# colorama is a Windows-only transitive of click (via uvicorn, via mcp). Same
-# reasoning as pywin32: listing it with the marker keeps the marker in the
-# lockfile regardless of which OS pip-compile was run on, so a lockfile
-# compiled on Windows still installs cleanly on Linux CI.
-colorama; platform_system == "Windows"
 
 # --- Transitive security floors (Snyk-flagged CVEs) ---------------------------
 # These packages are pulled in by mcp / msal / httpx but ship vulnerable
