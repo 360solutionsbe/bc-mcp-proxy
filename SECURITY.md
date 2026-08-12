@@ -36,22 +36,26 @@ We support security fixes on the latest released minor version (`0.x`) on the `m
 
 ## Security review notes
 
-### Dependency hardening (0.5.0)
+### Dependency hardening (0.5.0, floors maintained since)
 
-The Snyk scan against `dxt/requirements.txt` flagged 16 vulnerabilities in transitive dependencies pulled in by `mcp`, `msal`, and `httpx`. None were in code we author. As of 0.5.0 we pin explicit security floors for the affected transitive deps in both `dxt/requirements.txt` and `pyproject.toml` so pip resolves to the patched versions:
+The Snyk scan against `dxt/requirements.txt` flagged 16 vulnerabilities in transitive dependencies pulled in by `mcp`, `msal`, and `httpx`. None were in code we author. As of 0.5.0 we pin explicit security floors for the affected transitive deps in both `dxt/requirements.in` and `pyproject.toml` so pip resolves to the patched versions. The floors are raised whenever the weekly Snyk scan flags a new advisory against the current pin — the table below is the current set:
 
 | Package           | Floor pin    | Headline issue                                              |
 |-------------------|--------------|-------------------------------------------------------------|
 | `h11`             | `>=0.16.0`   | HTTP Request Smuggling (Critical) — SNYK-PYTHON-H11-10293728 |
-| `cryptography`    | `>=46.0.6`   | Improper certificate validation (High)                      |
-| `pyjwt`           | `>=2.12.0`   | Improper signature verification (High)                      |
-| `python-multipart`| `>=0.0.26`   | Directory traversal (High)                                  |
-| `starlette`       | `>=0.49.1`   | ReDoS (High) + resource-allocation (Medium)                 |
-| `urllib3`         | `>=2.6.3`    | Data-amplification (High×2) + open-redirect (Medium×2)      |
-| `requests`        | `>=2.33.0`   | Sensitive-info leakage / insecure tempfile (Medium×2)       |
+| `cryptography`    | `>=50.0.0`   | Out-of-bounds read, improper certificate validation, timing attack, unthrottled allocation (High×4) |
+| `pyjwt`           | `>=2.13.0`   | Improper authentication (High) — SNYK-PYTHON-PYJWT-17053408 |
+| `python-multipart`| `>=0.0.30`   | Inefficient algorithmic complexity (High)                   |
+| `starlette`       | `>=1.3.1`    | SSRF, unthrottled allocation, incorrectly-resolved name (High×3) |
+| `urllib3`         | `>=2.7.0`    | Data-amplification (High×2) + open-redirect (Medium×2)      |
+| `requests`        | `>=2.33.1`   | Sensitive-info leakage / insecure tempfile (Medium×2)       |
 | `python-dotenv`   | `>=1.2.2`    | Symlink attack (Medium)                                     |
 
 When upstream `mcp`/`msal`/`httpx` releases bring their own pins up to or above these floors, our explicit pins become redundant and can be removed.
+
+### `mcp` version cap (<2.0.0)
+
+`mcp` is constrained to `>=1.28.1,<2.0.0`. The floor is the fix version for two High-severity advisories in the 1.x line (SNYK-PYTHON-MCP-18016318, authorization bypass through user-controlled key; SNYK-PYTHON-MCP-18016320, missing origin validation in WebSockets). The cap is an API constraint, not a security one: `mcp` 2.x removes `mcp.client.streamable_http.streamablehttp_client` and `mcp.shared.exceptions.McpError`, both of which `bc_mcp_proxy/proxy.py` builds on. Lifting the cap requires porting the proxy to the 2.x client API.
 
 ### SSRF hardening (0.5.0)
 

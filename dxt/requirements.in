@@ -12,9 +12,21 @@
 # The lockfile is what Snyk scans (and what the build script vendors into
 # the .dxt). Pinning every transitive eliminates the discrepancy between
 # Snyk's static resolver and pip's install-time resolver.
+#
+# COMPILE THE LOCKFILE ON LINUX. pip-compile resolves against the OS it runs
+# on, so a Windows run adds Windows-only entries (pywin32, colorama). pip
+# skips those on Linux via their markers, but Snyk's requirements.txt scanner
+# ignores environment markers and fails the whole scan with "Missing required
+# packages". A Linux-compiled lockfile omits them entirely, and the Windows
+# .dxt build still picks them up as ordinary unpinned transitives.
 
 # --- Direct runtime dependencies ----------------------------------------------
-mcp>=1.21.0
+# mcp is capped below 2.0.0: the 2.x line drops the APIs this proxy builds on
+# (mcp.client.streamable_http.streamablehttp_client, mcp.shared.exceptions.McpError).
+# The floor is the fix version for SNYK-PYTHON-MCP-18016318 (Authorization Bypass
+# Through User-Controlled Key) and SNYK-PYTHON-MCP-18016320 (Missing Origin
+# Validation in WebSockets).
+mcp>=1.28.1,<2.0.0
 httpx>=0.28.0
 msal>=1.34.0
 msal-extensions>=1.3.0
@@ -31,10 +43,10 @@ pywin32; sys_platform == "win32"
 # versions in their unconstrained transitive trees. We constrain to the
 # patched floors here so pip-compile's resolution lands above them.
 h11>=0.16.0                  # SNYK-PYTHON-H11-10293728: HTTP Request Smuggling
-cryptography>=48.0.0         # SNYK-PYTHON-CRYPTOGRAPHY-* + CVE-2026-39892
-pyjwt>=2.12.1                # SNYK-PYTHON-PYJWT-15518059
+cryptography>=50.0.0         # SNYK-PYTHON-CRYPTOGRAPHY-* + CVE-2026-39892
+pyjwt>=2.13.0                # SNYK-PYTHON-PYJWT-15518059 + -17053408
 python-dotenv>=1.2.2         # SNYK-PYTHON-PYTHONDOTENV-16115271
-python-multipart>=0.0.27     # SNYK-PYTHON-PYTHONMULTIPART-*
+python-multipart>=0.0.30     # SNYK-PYTHON-PYTHONMULTIPART-*
 requests>=2.33.1             # SNYK-PYTHON-REQUESTS-*
-starlette>=1.0.0            # SNYK-PYTHON-STARLETTE-*
+starlette>=1.3.1             # SNYK-PYTHON-STARLETTE-*
 urllib3>=2.7.0               # SNYK-PYTHON-URLLIB3-* (CVE-2026-44431/44432)
