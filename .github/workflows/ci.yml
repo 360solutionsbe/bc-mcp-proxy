@@ -77,7 +77,7 @@ jobs:
     # Runs on the same host OS as the matching release build, because pip
     # evaluates environment markers (sys_platform, platform_system) against the
     # host rather than --platform.
-    name: .dxt bundle resolves (${{ matrix.platform_tag }})
+    name: .mcpb bundle resolves (${{ matrix.platform_tag }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -118,7 +118,7 @@ jobs:
                  -r dxt/requirements.txt; then
               echo "cp$abi OK"
             else
-              echo "::error::dxt/requirements.txt has no installable wheel set for Python $py on ${{ matrix.pip_platform }} — the .dxt build for this ABI would fail at release time."
+              echo "::error::dxt/requirements.txt has no installable wheel set for Python $py on ${{ matrix.pip_platform }} — the .mcpb build for this ABI would fail at release time."
               failed=1
             fi
             echo "::endgroup::"
@@ -132,15 +132,15 @@ jobs:
     # compiled on Windows carries platform-gated entries (pywin32, colorama)
     # that pip correctly skips on Linux, which is enough to break the Snyk job.
     # Compile the lockfile on Linux; this check catches it if someone doesn't.
-    name: lockfile has no platform-gated pins
+    name: lockfile has no environment-marker pins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Reject platform markers in dxt/requirements.txt
         run: |
-          if grep -nE '^[^#].*;.*(sys_platform|platform_system|platform_machine)' dxt/requirements.txt; then
-            echo "::error::The lines above are platform-gated pins. Snyk ignores environment markers and will fail the Open Source scan with 'Missing required packages'. Regenerate the lockfile on Linux (see the header of dxt/requirements.in)."
+          if grep -nE '^[^#].*;.*(sys_platform|platform_system|platform_machine|platform_release|platform_version|os_name|python_version|python_full_version|implementation_name|implementation_version)' dxt/requirements.txt; then
+            echo "::error::The lines above carry environment markers (platform or python_version). Snyk ignores environment markers and will fail the Open Source scan with 'Missing required packages'. Regenerate the lockfile on Linux with the lowest supported Python (see the header of dxt/requirements.in)."
             exit 1
           fi
-          echo "No platform-gated pins."
+          echo "No environment-marker pins."

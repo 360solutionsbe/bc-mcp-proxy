@@ -1,6 +1,6 @@
 name: Release
 
-# On `git push --tags` of a v*.*.* tag, build the .dxt bundle on each
+# On `git push --tags` of a v*.*.* tag, build the .mcpb bundle on each
 # supported host (Windows / macOS / Linux), publish a GitHub Release, and
 # attach the bundles as assets. Each host produces a bundle pinned to its
 # own platform's wheels — that is unavoidable because cryptography ships
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   build:
-    name: Build .dxt (${{ matrix.platform_tag }})
+    name: Build .mcpb (${{ matrix.platform_tag }})
     strategy:
       fail-fast: false
       matrix:
@@ -57,8 +57,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: dxt-${{ matrix.platform_tag }}
-          path: dist/*.dxt
+          name: mcpb-${{ matrix.platform_tag }}
+          path: dist/*.mcpb
           if-no-files-found: error
 
   release:
@@ -79,6 +79,12 @@ jobs:
       - name: List downloaded bundles
         run: ls -la dist
 
+      - name: Write SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum *.mcpb > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Resolve tag name
         id: tag
         run: |
@@ -94,7 +100,9 @@ jobs:
           tag_name: ${{ steps.tag.outputs.name }}
           name: ${{ steps.tag.outputs.name }}
           generate_release_notes: true
-          files: dist/*.dxt
+          files: |
+            dist/*.mcpb
+            dist/SHA256SUMS.txt
 
   publish-pypi:
     name: Publish to PyPI

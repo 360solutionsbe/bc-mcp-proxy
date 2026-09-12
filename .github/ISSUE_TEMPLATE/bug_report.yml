@@ -23,8 +23,8 @@ body:
     attributes:
       label: How was the proxy installed?
       options:
-        - Claude Desktop .dxt extension (download from Releases)
-        - Claude Desktop .dxt extension (built locally with dxt/build.ps1 or build.sh)
+        - Claude Desktop extension (.mcpb / .dxt downloaded from Releases or the directory)
+        - Claude Desktop extension (built locally with dxt/build.ps1 or build.sh)
         - python -m bc_mcp_proxy via Claude Desktop's claude_desktop_config.json
         - python -m bc_mcp_proxy via VS Code / Cursor MCP config
         - Other (please describe in "Additional context")
@@ -86,7 +86,7 @@ body:
       label: Steps to reproduce
       description: Minimal steps a maintainer can run to see the same failure.
       placeholder: |
-        1. Install the .dxt
+        1. Install the .mcpb
         2. Restart Claude Desktop
         3. Ask "list all customers"
         4. See ...

@@ -1,9 +1,9 @@
-# Build a .dxt bundle for Claude Desktop from the current source tree.
+# Build a .mcpb bundle (MCP Bundle, formerly .dxt) for Claude Desktop from the current source tree.
 #
 # Usage (from the repo root):
 #   pwsh dxt/build.ps1
 #
-# Output: dist/bc-mcp-proxy-<version>-win-amd64.dxt
+# Output: dist/vgs-bc-mcp-<version>-win-amd64.mcpb
 #
 # What this does:
 #   1. Stages the proxy source under dxt/build/server/bc_mcp_proxy.
@@ -25,14 +25,14 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
-# Resolve version from bc_mcp_proxy/__init__.py.
+# Resolve version from bc_mcp_proxy/_version.py.
 $version = (Select-String -Path 'bc_mcp_proxy/_version.py' -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-if (-not $version) { throw 'Could not determine package version from bc_mcp_proxy/__init__.py.' }
+if (-not $version) { throw 'Could not determine package version from bc_mcp_proxy/_version.py.' }
 
 $platformTag = 'win-amd64'
 $buildDir = Join-Path $repoRoot 'dxt/build'
 $distDir  = Join-Path $repoRoot 'dist'
-$bundle   = Join-Path $distDir  "bc-mcp-proxy-$version-$platformTag.dxt"
+$bundle   = Join-Path $distDir  "vgs-bc-mcp-$version-$platformTag.mcpb"
 
 if (Test-Path $buildDir) { Remove-Item -Recurse -Force $buildDir }
 New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
