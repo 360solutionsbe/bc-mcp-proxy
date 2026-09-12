@@ -26,7 +26,7 @@
 # The floor is the fix version for SNYK-PYTHON-MCP-18016318 (Authorization Bypass
 # Through User-Controlled Key) and SNYK-PYTHON-MCP-18016320 (Missing Origin
 # Validation in WebSockets).
-mcp>=1.28.1,<2.0.0
+mcp>=2.2.0,<3.0.0
 httpx>=0.28.0
 msal>=1.34.0
 msal-extensions>=1.3.0

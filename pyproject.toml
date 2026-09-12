@@ -41,7 +41,7 @@ dependencies = [
   # built on (mcp.client.streamable_http.streamablehttp_client and
   # mcp.shared.exceptions.McpError). The floor is the fix version for
   # SNYK-PYTHON-MCP-18016318 / SNYK-PYTHON-MCP-18016320.
-  "mcp>=1.28.1,<2.0.0",
+  "mcp>=1.28.1,<3.0.0",
   "httpx>=0.28.0",
   "msal>=1.34.0",
   "msal-extensions>=1.3.0",
