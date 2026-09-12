@@ -44,10 +44,12 @@ Copy-Item -Path 'dxt/manifest.json'      -Destination "$buildDir/manifest.json"
 Copy-Item -Path 'dxt/requirements.txt'   -Destination "$buildDir/server/requirements.txt"
 Copy-Item -Recurse -Path 'bc_mcp_proxy'  -Destination "$buildDir/server/bc_mcp_proxy"
 Copy-Item -Path 'LICENSE'                -Destination "$buildDir/LICENSE"
-if (Test-Path 'dxt/icon.png') {
-  Copy-Item -Path 'dxt/icon.png' -Destination "$buildDir/icon.png"
-} else {
-  Write-Host "  (no dxt/icon.png — bundle will ship without an icon)"
+foreach ($icon in @('icon.png', 'icon-256.png')) {
+  if (Test-Path "dxt/$icon") {
+    Copy-Item -Path "dxt/$icon" -Destination "$buildDir/$icon"
+  } else {
+    Write-Host "  (no dxt/$icon — bundle will ship without it)"
+  }
 }
 
 $pythonAbis = @('310', '311', '312', '313', '314')
