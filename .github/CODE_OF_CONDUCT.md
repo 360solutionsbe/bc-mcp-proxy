@@ -8,6 +8,6 @@ The full canonical text is maintained at https://www.contributor-covenant.org/ve
 
 ## Reporting
 
-To report behaviour that violates the Code of Conduct, contact the project maintainers at **[dev@360solutions.be](mailto:dev@360solutions.be)**. Reports are handled confidentially.
+To report behaviour that violates the Code of Conduct, contact the project maintainers at **[support@vangeldersolutions.be](mailto:support@vangeldersolutions.be)**. Reports are handled confidentially.
 
 For security-sensitive reports (vulnerabilities, credential exposure, etc.), please use the channels described in [SECURITY.md](../SECURITY.md) instead.

@@ -1,6 +1,6 @@
 # Notice — Privacy, Anthropic subscription, and trademarks
 
-`360solutions-bc-mcp` (the *bc-mcp-proxy*) connects an AI client — typically
+`vgs-bc-mcp` (the *bc-mcp-proxy*) connects an AI client — typically
 Anthropic's Claude — to your Microsoft Dynamics 365 Business Central
 environment via the Model Context Protocol. When you use it, the queries you
 run and the Business Central data returned to the AI client in response —
@@ -42,7 +42,7 @@ more than once and will likely change again. Treat the bullets above as our
 
 You are responsible for selecting the AI subscription that matches the
 sensitivity of the data you process through this proxy and for configuring its
-privacy settings appropriately. 360 Solutions / Vangelder Solutions does not
+privacy settings appropriately. Vangelder Solutions does not
 control how Anthropic (or any other AI provider you point an MCP client at)
 processes data sent to that provider.
 
@@ -53,7 +53,7 @@ not with this proxy or its maintainers.
 
 ## Not affiliated with Anthropic or Microsoft
 
-360 Solutions (a Vangelder Solutions brand) is an independent software vendor.
+Vangelder Solutions is an independent software vendor.
 It is **not** affiliated with, endorsed by, sponsored by, or a reseller of
 Anthropic or Microsoft.
 

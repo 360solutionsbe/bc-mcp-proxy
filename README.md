@@ -1,15 +1,15 @@
-# 360Solutions-BC-MCP
+# VGS-BC-MCP
 
-[![CI](https://github.com/360solutionsbe/bc-mcp-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/360solutionsbe/bc-mcp-proxy/actions/workflows/ci.yml)
-[![Snyk](https://github.com/360solutionsbe/bc-mcp-proxy/actions/workflows/snyk.yml/badge.svg)](https://github.com/360solutionsbe/bc-mcp-proxy/actions/workflows/snyk.yml)
-[![Known Vulnerabilities](https://snyk.io/test/github/360solutionsbe/bc-mcp-proxy/badge.svg)](https://snyk.io/test/github/360solutionsbe/bc-mcp-proxy)
-[![Latest Release](https://img.shields.io/github/v/release/360solutionsbe/bc-mcp-proxy)](https://github.com/360solutionsbe/bc-mcp-proxy/releases/latest)
+[![CI](https://github.com/VangelderSolutions/bc-mcp-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/VangelderSolutions/bc-mcp-proxy/actions/workflows/ci.yml)
+[![Snyk](https://github.com/VangelderSolutions/bc-mcp-proxy/actions/workflows/snyk.yml/badge.svg)](https://github.com/VangelderSolutions/bc-mcp-proxy/actions/workflows/snyk.yml)
+[![Known Vulnerabilities](https://snyk.io/test/github/VangelderSolutions/bc-mcp-proxy/badge.svg)](https://snyk.io/test/github/VangelderSolutions/bc-mcp-proxy)
+[![Latest Release](https://img.shields.io/github/v/release/VangelderSolutions/bc-mcp-proxy)](https://github.com/VangelderSolutions/bc-mcp-proxy/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 > **Fork of [microsoft/BCTech `samples/BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython)** — a resilient Python MCP stdio proxy that bridges Claude Desktop, VS Code, Cursor and other MCP-compatible clients to the Microsoft Dynamics 365 Business Central MCP HTTP endpoint.
 >
-> Built and maintained by **[360 Solutions](https://360solutions.be)** (a Vangelder Solutions brand). Original: Copyright (c) Microsoft Corporation. Modifications: Copyright (c) 2026 Vangelder Solutions. Licensed under the MIT License.
+> Built and maintained by **[Vangelder Solutions](https://www.vangeldersolutions.be)**. Original: Copyright (c) Microsoft Corporation. Modifications: Copyright (c) 2026 Vangelder Solutions. Licensed under the MIT License.
 
 > ✅ **BC v28+ (May 2026): generally available.** Microsoft's Business Central MCP server is officially supported from version 28 onward, and this proxy targets it by default. The v26/v27 endpoint that preceded it was a preview and is still supported here for environments that haven't upgraded — expect occasional breaking changes from Microsoft on that path until everyone is on v28.
 >
@@ -27,7 +27,7 @@
 
 Pre-built `.dxt` bundles are published on each release with all Python dependencies vendored — no `pip install` step required.
 
-1. **Download** the bundle for your platform from the [latest release](https://github.com/360solutionsbe/bc-mcp-proxy/releases/latest):
+1. **Download** the bundle for your platform from the [latest release](https://github.com/VangelderSolutions/bc-mcp-proxy/releases/latest):
 
    | Platform | Asset |
    |---|---|
@@ -153,13 +153,28 @@ In Business Central, in your target environment:
 ### Step 3 — Install the proxy
 
 ```bash
-python -m pip install --upgrade 360solutions-bc-mcp
+python -m pip install --upgrade vgs-bc-mcp
 ```
+
+> **Renamed in 0.6.0.** Earlier releases were published as `360solutions-bc-mcp`. That project
+> is archived and stops at 0.5.7 — it does **not** upgrade into this one, so install the new
+> name explicitly. If you already have the old package, replace it rather than upgrading it:
+>
+> ```bash
+> python -m pip uninstall -y 360solutions-bc-mcp
+> python -m pip install --upgrade vgs-bc-mcp
+> ```
+>
+> Both distributions ship the same `bc_mcp_proxy` files, so having them installed side by side
+> means uninstalling either one takes the other's files with it. Keep only the new one.
+>
+> The import package (`bc_mcp_proxy`), the `python -m bc_mcp_proxy` command and the `.dxt`
+> filenames are unchanged, so existing MCP client configurations keep working.
 
 Or from source:
 
 ```bash
-git clone https://github.com/360solutionsbe/bc-mcp-proxy.git
+git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
 cd bc-mcp-proxy
 python -m pip install -e .
 ```
@@ -354,7 +369,7 @@ Token cache locations (when no custom auth header is supplied):
 - **JSON-RPC `-32603 "An error occurred."` with no detail.** This is BC's catch-all when something inside a dynamic-tool call goes wrong. The actual reason is logged to Azure Application Insights as event `RT0054` with custom dimension `toolInvocationFailureReason`. Enable telemetry on the BC environment and query (`traces | where customDimensions.eventId == 'RT0054' | where customDimensions.toolInvocationResult == 'Failure'`) to see what BC actually rejected.
 - **Frequent reconnects in logs.** Inspect upstream availability — the proxy logs `Upstream connection error (...); reconnecting in Xs (attempt N/M)` whenever it retries. After the configured budget the proxy gives up and the local stdio pipe closes.
 - **Repeated sign-in prompts.** The MSAL token cache may not be writable. Pass `--DeviceCacheLocation` to point at a directory you control.
-- **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade 360solutions-bc-mcp`).
+- **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade vgs-bc-mcp`). If this appeared right after you uninstalled or upgraded the old `360solutions-bc-mcp` package, that uninstall removed the shared `bc_mcp_proxy` files — restore them with `python -m pip install --force-reinstall vgs-bc-mcp`.
 
 ---
 
@@ -416,7 +431,7 @@ For production use against a live BC tenant we recommend Claude Team, Claude Ent
 ## Development
 
 ```bash
-git clone https://github.com/360solutionsbe/bc-mcp-proxy.git
+git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
 cd bc-mcp-proxy
 python -m pip install -e ".[test]"
 python -m pytest
@@ -426,7 +441,7 @@ python -m pytest
 
 ## Need help?
 
-The Azure App Registration and the right permissions take attention to detail. For customers who would rather not deal with `Manifest.json`, redirect URIs and delegated permissions themselves, **360 Solutions** offers an **end-to-end MCP setup package**:
+The Azure App Registration and the right permissions take attention to detail. For customers who would rather not deal with `Manifest.json`, redirect URIs and delegated permissions themselves, **Vangelder Solutions** offers an **end-to-end MCP setup package**:
 
 - Azure App Registration created and validated in your tenant
 - BC MCP Configuration created on the right environment(s)
@@ -436,15 +451,15 @@ The Azure App Registration and the right permissions take attention to detail. F
 
 One appointment (online or on-site), configuration done, MCP working in your production environment.
 
-📧 **dev@360solutions.be**
-🌐 [www.360solutions.be](https://www.360solutions.be)
-📦 [github.com/360solutionsbe/bc-mcp-proxy](https://github.com/360solutionsbe/bc-mcp-proxy)
+📧 **support@vangeldersolutions.be**
+🌐 [www.vangeldersolutions.be](https://www.vangeldersolutions.be)
+📦 [github.com/VangelderSolutions/bc-mcp-proxy](https://github.com/VangelderSolutions/bc-mcp-proxy)
 
 ---
 
 ## Sources
 
-- [`360solutions-bc-mcp` on GitHub](https://github.com/360solutionsbe/bc-mcp-proxy) — this fork, MIT-licensed, maintained by 360 Solutions
+- [`vgs-bc-mcp` on GitHub](https://github.com/VangelderSolutions/bc-mcp-proxy) — this fork, MIT-licensed, maintained by Vangelder Solutions
 - [`microsoft/BCTech BcMCPProxyPython`](https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython) — Microsoft's reference implementation
 - [Configure Business Central MCP Server](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/ai/configure-mcp-server) — Microsoft Learn
 - [Analyze MCP Server Tool Calls Telemetry](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/telemetry-mcp-server-trace) — RT0054 event reference

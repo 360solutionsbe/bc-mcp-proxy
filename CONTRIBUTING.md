@@ -1,11 +1,11 @@
-# Contributing to 360Solutions-BC-MCP
+# Contributing to VGS-BC-MCP
 
 Thanks for your interest. The proxy is small and the contribution loop is simple.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/360solutionsbe/bc-mcp-proxy.git
+git clone https://github.com/VangelderSolutions/bc-mcp-proxy.git
 cd bc-mcp-proxy
 python -m pip install -e ".[test]"
 python -m pytest
@@ -55,7 +55,7 @@ Please **don't** open a public issue for vulnerabilities. See [SECURITY.md](SECU
 
 ## Help with Azure / BC setup
 
-The proxy install is the easy part. Azure App Registration and BC MCP Configuration are the parts most users actually need help with. If your "issue" is really a setup question, save yourself the round-trip and contact us at [dev@360solutions.be](mailto:dev@360solutions.be) — that's a paid setup service we offer, and it's much faster than us debugging your tenant via GitHub comments.
+The proxy install is the easy part. Azure App Registration and BC MCP Configuration are the parts most users actually need help with. If your "issue" is really a setup question, save yourself the round-trip and contact us at [support@vangeldersolutions.be](mailto:support@vangeldersolutions.be) — that's a paid setup service we offer, and it's much faster than us debugging your tenant via GitHub comments.
 
 ## Questions vs. issues
 
