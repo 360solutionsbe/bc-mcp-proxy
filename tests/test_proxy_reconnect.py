@@ -12,23 +12,32 @@ import pytest
 from mcp.shared.exceptions import McpError
 from mcp.types import INTERNAL_ERROR, ErrorData
 
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
+
 from bc_mcp_proxy.config import ProxyConfig
 from bc_mcp_proxy.proxy import (
     _BaseExceptionGroup,
     _backoff_for_attempt,
+    _exception_hints_at_client_cancel,
     _format_upstream_rejection,
     _is_recoverable_upstream_error,
+    _parse_retry_after,
     _permanent_rejection_reason,
     _permanent_upstream_status,
+    _retry_after_seconds,
+    _retryable_upstream_status,
     _UpstreamConnectionManager,
     _UpstreamConnectRejected,
     _UpstreamSessionHolder,
 )
 
 
-def _http_status_error(status: int) -> httpx.HTTPStatusError:
+def _http_status_error(
+    status: int, headers: Optional[dict[str, str]] = None,
+) -> httpx.HTTPStatusError:
   request = httpx.Request("POST", "https://mcp.businesscentral.dynamics.com")
-  response = httpx.Response(status, request=request)
+  response = httpx.Response(status, request=request, headers=headers)
   return httpx.HTTPStatusError(
       f"{status}", request=request, response=response)
 
@@ -72,6 +81,74 @@ def test_nested_exception_group_walks_to_leaves() -> None:
   inner = _BaseExceptionGroup("inner", [httpx.ReadTimeout("x")])
   outer = _BaseExceptionGroup("outer", [inner, httpx.ConnectError("y")])
   assert _is_recoverable_upstream_error(outer)
+
+
+# -- Transient HTTP statuses (BC online rate limits / operational limits) ----
+#
+# Before this, a 429 from Business Central was neither "permanent" (429 was
+# excluded from _permanent_upstream_status) nor "recoverable" (HTTPStatusError
+# is not in _RECOVERABLE_HTTPX_ERRORS), so run() re-raised and the proxy
+# process exited on the first rate limit.
+
+
+@pytest.mark.parametrize("status", [408, 429, 503, 504])
+def test_transient_statuses_are_recoverable(status: int) -> None:
+  assert _is_recoverable_upstream_error(_http_status_error(status))
+  assert _is_recoverable_upstream_error(
+      _BaseExceptionGroup("wrapped", [_http_status_error(status)]))
+  assert _permanent_upstream_status(_http_status_error(status)) is None
+  assert _retryable_upstream_status(_http_status_error(status)) == status
+
+
+@pytest.mark.parametrize("status", [500, 502])
+def test_other_5xx_is_not_recoverable(status: int) -> None:
+  # An unexpected 5xx is neither a config problem nor a documented transient;
+  # let it propagate so the failure is visible rather than retried blindly.
+  assert not _is_recoverable_upstream_error(_http_status_error(status))
+  assert _permanent_upstream_status(_http_status_error(status)) is None
+
+
+def test_429_wrapped_in_mcp_error_cause_chain_is_recoverable() -> None:
+  # The client lib wraps the transport error during initialize(); the status
+  # must be found along __cause__.
+  status_error = _http_status_error(429)
+  wrapped = McpError(ErrorData(code=INTERNAL_ERROR, message="init failed"))
+  wrapped.__cause__ = status_error
+  assert _is_recoverable_upstream_error(wrapped)
+  assert _retryable_upstream_status(_BaseExceptionGroup("g", [wrapped])) == 429
+  assert _permanent_rejection_reason(wrapped) is None
+
+
+def test_429_does_not_hint_at_client_cancellation() -> None:
+  assert not _exception_hints_at_client_cancel(_http_status_error(429))
+  assert _exception_hints_at_client_cancel(_http_status_error(404))
+
+
+# -- Retry-After --------------------------------------------------------------
+
+
+def test_retry_after_seconds_integer() -> None:
+  assert _retry_after_seconds(_http_status_error(429, {"Retry-After": "30"})) == 30.0
+
+
+def test_retry_after_http_date() -> None:
+  now = datetime(2026, 9, 12, 12, 0, 0, tzinfo=timezone.utc)
+  when = format_datetime(now + timedelta(seconds=45), usegmt=True)
+  assert _retry_after_seconds(_http_status_error(503, {"Retry-After": when}), now=now) == 45.0
+
+
+def test_retry_after_in_the_past_is_ignored() -> None:
+  now = datetime(2026, 9, 12, 12, 0, 0, tzinfo=timezone.utc)
+  when = format_datetime(now - timedelta(seconds=5), usegmt=True)
+  assert _retry_after_seconds(_http_status_error(503, {"Retry-After": when}), now=now) is None
+
+
+def test_retry_after_garbage_ignored() -> None:
+  assert _parse_retry_after("soon") is None
+  assert _parse_retry_after("") is None
+  assert _parse_retry_after(None) is None
+  assert _retry_after_seconds(_http_status_error(429)) is None
+  assert _retry_after_seconds(httpx.ReadTimeout("x")) is None
 
 
 # -- Backoff progression ------------------------------------------------------
@@ -139,6 +216,17 @@ class _FakeManager(_UpstreamConnectionManager):
       # Mirrors _open_and_serve converting an McpError at initialize().
       raise _BaseExceptionGroup(
           "wrapped", [_UpstreamConnectRejected("Session terminated")])
+    if action.startswith("fail-429"):
+      # "fail-429" or "fail-429-retry-after-<seconds>"
+      headers = None
+      if action.startswith("fail-429-retry-after-"):
+        headers = {"Retry-After": action.rsplit("-", 1)[1]}
+      raise _BaseExceptionGroup("wrapped", [_http_status_error(429, headers)])
+    if action == "fail-connect-429":
+      # initialize() raised McpError whose cause is the transport's 429.
+      err = McpError(ErrorData(code=INTERNAL_ERROR, message="init failed"))
+      err.__cause__ = _http_status_error(429)
+      raise _BaseExceptionGroup("wrapped", [err])
     raise AssertionError(f"Unknown action: {action}")
 
 
@@ -195,6 +283,47 @@ async def test_unwraps_exception_group_around_read_timeout() -> None:
   )
   await mgr.run()
   assert sleeps == [1.0]
+
+
+async def test_429_is_retried_instead_of_crashing() -> None:
+  mgr, sleeps = _build_manager(["fail-429", "succeed-then-graceful"])
+  await mgr.run()
+  assert mgr.attempts == ["fail-429", "succeed-then-graceful"]
+  assert sleeps == [1.0]
+  assert mgr.state.fatal is None
+
+
+async def test_manager_honors_retry_after_capped() -> None:
+  # Retry-After: 60 on the first attempt -> sleep the cap (16s), not 60s
+  # and not the 1s exponential step.
+  mgr, sleeps = _build_manager(
+      ["fail-429-retry-after-60", "succeed-then-graceful"])
+  await mgr.run()
+  assert sleeps == [16.0]
+
+
+async def test_manager_retry_after_below_backoff_keeps_backoff() -> None:
+  # Second failure would back off 2s; a Retry-After of 1s must not shorten it.
+  mgr, sleeps = _build_manager(
+      ["fail-429", "fail-429-retry-after-1", "succeed-then-graceful"])
+  await mgr.run()
+  assert sleeps == [1.0, 2.0]
+
+
+async def test_manager_retry_after_between_step_and_cap_is_used() -> None:
+  mgr, sleeps = _build_manager(
+      ["fail-429-retry-after-5", "succeed-then-graceful"])
+  await mgr.run()
+  assert sleeps == [5.0]
+
+
+async def test_connect_429_not_treated_as_permanent() -> None:
+  # A rate-limited handshake must back off and retry, not park as fatal.
+  mgr, sleeps = _build_manager(["fail-connect-429", "succeed-then-graceful"])
+  await mgr.run()
+  assert mgr.attempts == ["fail-connect-429", "succeed-then-graceful"]
+  assert sleeps == [1.0]
+  assert mgr.state.fatal is None
 
 
 async def test_non_recoverable_error_propagates_without_retry() -> None:

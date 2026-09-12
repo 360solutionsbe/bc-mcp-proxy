@@ -4,31 +4,51 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
 
+from ._version import __version__
 
-# Microsoft now documents only the v28 host (mcp.businesscentral.dynamics.com)
-# for non-Microsoft MCP clients. The v26/v27 path-based URL still works for
-# customers whose environments haven't been upgraded.
+
+# Since BC 2026 release wave 1 (v28) Microsoft documents a single MCP host for
+# every client -- mcp.businesscentral.dynamics.com -- with the environment,
+# tenant, company and configuration carried in request headers. Version 29
+# (2026 release wave 2) keeps that contract and only adds tools. The older
+# per-environment path on api.businesscentral.dynamics.com is no longer
+# documented; it is kept as an explicit legacy path for tenants that have not
+# been upgraded yet.
 V28_HOST = "mcp.businesscentral.dynamics.com"
 V28_BASE_URL = "https://mcp.businesscentral.dynamics.com"
+LEGACY_HOST = "api.businesscentral.dynamics.com"
 V27_BASE_URL = "https://api.businesscentral.dynamics.com"
 
-# The v28 endpoint requires a different OAuth scope than v26/v27. Hitting the
-# v28 host with the v26/v27 scope yields a 401.
+# The modern host requires a different OAuth scope than the legacy path.
+# Hitting the modern host with the legacy scope yields a 401.
 V27_SCOPE = "https://api.businesscentral.dynamics.com/.default"
 V28_SCOPE = "https://mcp.businesscentral.dynamics.com/.default"
+MODERN_SCOPE = V28_SCOPE
 
 # Valid values for ProxyConfig.auth_mode / --AuthMode / BC_AUTH_MODE.
 AUTH_MODES = ("auto", "interactive", "device_code")
 
 
-def is_v28_endpoint(base_url: str) -> bool:
-  """Detect the v28+ Business Central MCP host.
-
-  v26/v27: api.businesscentral.dynamics.com/v2.0/{env}/mcp
-  v28+   : mcp.businesscentral.dynamics.com (env now flows through headers)
-  """
+def is_legacy_endpoint(base_url: str) -> bool:
+  """True only for the pre-v28 per-environment host (api.businesscentral...)."""
   host = (urlparse(base_url).hostname or "").lower()
-  return host == V28_HOST
+  return host == LEGACY_HOST
+
+
+def is_v28_endpoint(base_url: str) -> bool:
+  """Detect the modern (v28+) header-routed Business Central MCP endpoint.
+
+  legacy : api.businesscentral.dynamics.com/v2.0/{env}/mcp
+  modern : mcp.businesscentral.dynamics.com (env flows through headers)
+
+  Everything that is not the legacy host is treated as modern: the documented
+  host, any future *.businesscentral.dynamics.com regional or staging
+  subdomain, and non-BC hosts opted in via BC_ALLOW_NON_STANDARD_BASE_URL
+  (a local mock of today's server looks like the modern one). Before this
+  an unknown host silently fell back to the legacy URL shape and scope,
+  which fails closed with a 401 instead of an actionable error.
+  """
+  return not is_legacy_endpoint(base_url)
 
 
 # Hosts the proxy will talk to without prompting. Anything outside this
@@ -42,7 +62,7 @@ _TRUSTED_BC_HOST_SUFFIX = ".businesscentral.dynamics.com"
 def is_trusted_bc_host(base_url: str) -> bool:
   """Return True if base_url is https and points at a Business Central host.
 
-  Accepts api.businesscentral.dynamics.com (v26/v27), mcp.businesscentral.dynamics.com
+  Accepts api.businesscentral.dynamics.com (legacy), mcp.businesscentral.dynamics.com
   (v28+), and any future *.businesscentral.dynamics.com regional or staging
   subdomain Microsoft might introduce.
   """
@@ -95,20 +115,22 @@ def resolve_token_scope(base_url: str, override: Optional[str]) -> str:
   """Pick the right OAuth scope for the configured endpoint.
 
   If the user explicitly set BC_TOKEN_SCOPE (or --TokenScope), honour it.
-  Otherwise auto-pick: v28 host needs the v28 scope, anything else gets the
-  v26/v27 scope.
+  Otherwise auto-pick: only the legacy api.* host gets the legacy scope;
+  every other host gets the modern mcp.* scope.
   """
   if override:
     return override
-  return V28_SCOPE if is_v28_endpoint(base_url) else V27_SCOPE
+  return V27_SCOPE if is_legacy_endpoint(base_url) else MODERN_SCOPE
 
 
 @dataclass(slots=True)
 class ProxyConfig:
   """Configuration values required to run the Business Central MCP proxy."""
 
-  server_name: str = "BcMCPProxyPython"
-  server_version: str = "0.5.7"
+  # Sent as the MCP Implementation name and in the X-Client-Application
+  # header, which BC telemetry records as `clientName` (event RT0054).
+  server_name: str = "vgs-bc-mcp"
+  server_version: str = __version__
   instructions: Optional[str] = None
 
   tenant_id: Optional[str] = None
@@ -143,6 +165,15 @@ class ProxyConfig:
 
   # tools/list cache TTL — reduces round-trips and masks BC cold-starts.
   tools_cache_ttl_seconds: float = 300.0
+  # Fill in `title` and readOnlyHint/destructiveHint on forwarded tools that
+  # lack them, keyed on BC's documented tool naming. Lets Claude auto-approve
+  # read-only tools and always confirm writes; required for directory
+  # listing. BC_ANNOTATE_TOOLS=0 / --NoAnnotateTools disables it.
+  annotate_tools: bool = True
+  # Forward resources/* and prompts/* to BC in addition to tools/*. BC v28+
+  # returns large datasets as embedded resources / file references; v29 adds
+  # more. BC_FORWARD_RESOURCES_PROMPTS=0 / --NoForwardResourcesPrompts disables.
+  forward_resources_prompts: bool = True
   # Persistent on-disk tools/list cache TTL.
   tools_disk_cache_ttl_seconds: float = 24 * 60 * 60
 

@@ -41,6 +41,21 @@ def build_parser() -> argparse.ArgumentParser:
       help="Token acquisition strategy when no valid cached token exists: "
            "'auto' (interactive browser flow, fall back to device code), "
            "'interactive', or 'device_code'. Default: auto.")
+  parser.add_argument(
+      "--AnnotateTools", action="store_true", dest="annotate_tools", default=None,
+      help="Add title/readOnlyHint/destructiveHint to forwarded tools that lack "
+           "them (default: on).")
+  parser.add_argument(
+      "--NoAnnotateTools", action="store_false", dest="annotate_tools",
+      help="Forward tool definitions exactly as Business Central sends them.")
+  parser.add_argument(
+      "--ForwardResourcesPrompts", action="store_true",
+      dest="forward_resources_prompts", default=None,
+      help="Forward resources/* and prompts/* to Business Central (default: on).")
+  parser.add_argument(
+      "--NoForwardResourcesPrompts", action="store_false",
+      dest="forward_resources_prompts",
+      help="Expose only tools/* to the client.")
   parser.add_argument("--Debug", action="store_true", dest="enable_debug")
   return parser
 
@@ -84,6 +99,11 @@ def parse_args(argv: list[str] | None = None) -> ProxyConfig:
           "device_cache_name", args.device_cache_name, env, defaults.device_cache_name),
       auth_mode=_select("auth_mode", args.auth_mode, env, defaults.auth_mode).lower(),
       log_level=_select("log_level", args.log_level, env, defaults.log_level).upper(),
+      annotate_tools=_select_bool(
+          "annotate_tools", args.annotate_tools, env, defaults.annotate_tools),
+      forward_resources_prompts=_select_bool(
+          "forward_resources_prompts", args.forward_resources_prompts, env,
+          defaults.forward_resources_prompts),
       enable_debug=args.enable_debug or _env_flag("BC_DEBUG"),
   )
 
@@ -131,6 +151,8 @@ def _config_from_env() -> dict[str, Optional[str]]:
       "device_cache_name": os.getenv("BC_DEVICE_CACHE_NAME"),
       "auth_mode": os.getenv("BC_AUTH_MODE"),
       "log_level": os.getenv("BC_LOG_LEVEL"),
+      "annotate_tools": os.getenv("BC_ANNOTATE_TOOLS"),
+      "forward_resources_prompts": os.getenv("BC_FORWARD_RESOURCES_PROMPTS"),
   }
 
 
@@ -182,6 +204,30 @@ def _select_float(
     except ValueError as exc:
       raise ValueError(f"Environment variable for {key} must be numeric.") from exc
   return default_value
+
+
+def _select_bool(
+    key: str,
+    cli_value: Optional[bool],
+    env: dict[str, Optional[str]],
+    default_value: bool,
+) -> bool:
+  if cli_value is not None:
+    return cli_value
+  env_value = env.get(key)
+  if env_value is not None and env_value.strip():
+    return _parse_flag(key, env_value)
+  return default_value
+
+
+def _parse_flag(key: str, value: str) -> bool:
+  """'1/true/yes/on' -> True, '0/false/no/off' -> False (case-insensitive)."""
+  normalized = value.strip().lower()
+  if normalized in {"1", "true", "yes", "on"}:
+    return True
+  if normalized in {"0", "false", "no", "off"}:
+    return False
+  raise ValueError(f"Environment variable for {key} must be a boolean flag, got {value!r}.")
 
 
 def _env_flag(name: str) -> bool:

@@ -26,7 +26,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
 # Resolve version from bc_mcp_proxy/__init__.py.
-$version = (Select-String -Path 'bc_mcp_proxy/__init__.py' -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+$version = (Select-String -Path 'bc_mcp_proxy/_version.py' -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 if (-not $version) { throw 'Could not determine package version from bc_mcp_proxy/__init__.py.' }
 
 $platformTag = 'win-amd64'

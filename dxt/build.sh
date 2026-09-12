@@ -26,7 +26,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
-version="$(awk -F\" '/^__version__/ {print $2; exit}' bc_mcp_proxy/__init__.py)"
+version="$(awk -F\" '/^__version__/ {print $2; exit}' bc_mcp_proxy/_version.py)"
 if [[ -z "${version:-}" ]]; then
   echo "Could not determine package version from bc_mcp_proxy/__init__.py." >&2
   exit 1
