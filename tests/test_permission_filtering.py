@@ -205,3 +205,101 @@ async def test_session_terminated_aborts_without_verdicts() -> None:
   outcome = await probe_static_permissions(script, _tools(*names), timeout=1.0, concurrency=1)
   assert outcome.aborted is True
   assert len(script.calls) == 1  # the rest is skipped, not marked
+
+
+# -- bc-mcp-guard ----------------------------------------------------------------
+
+from bc_mcp_proxy.permissions import (  # noqa: E402
+    guard_tool_name, parse_guard_rows, read_guard_permissions, verdicts_from_guard)
+
+
+def _guard_rows() -> list[dict[str, Any]]:
+  return [
+      {"pageId": 30009, "pageName": "APIV2 - Customers", "sourceTableId": 18, "sourceTableName": "Customer",
+       "canRead": True, "canInsert": False, "canModify": True, "canDelete": False, "canExecute": True,
+       "hasSecurityFilter": True, "securityFilter": "Customer: No.=10000"},
+      {"pageId": 30017, "pageName": "APIV2 - Employees", "sourceTableId": 5200, "sourceTableName": "Employee",
+       "canRead": False, "canInsert": False, "canModify": False, "canDelete": False, "canExecute": True,
+       "hasSecurityFilter": False, "securityFilter": ""},
+      {"pageId": 30008, "pageName": "APIV2 - Items", "sourceTableId": 27, "sourceTableName": "Item",
+       "canRead": True, "canInsert": True, "canModify": True, "canDelete": True, "canExecute": False,
+       "hasSecurityFilter": False, "securityFilter": ""},
+      {"pageId": 50100, "pageName": "MCP Guard Eff. Permissions", "sourceTableId": 50100,
+       "sourceTableName": "MCP Guard Eff. Permission", "canRead": True, "canInsert": True,
+       "canModify": True, "canDelete": True, "canExecute": True, "hasSecurityFilter": False, "securityFilter": ""},
+  ]
+
+
+def _guard_text() -> str:
+  return "Returned all 4 records.\n" + json.dumps({"@odata.count": 4, "value": _guard_rows()})
+
+
+def test_guard_tool_is_recognised_by_entity_set_name() -> None:
+  assert guard_tool_name(_tools("List_Customers_PAG30009", "List_EffectivePermissions_PAG50100")) == "List_EffectivePermissions_PAG50100"
+  assert guard_tool_name(_tools("List_EffectivePermissions_PAG70123456")) == "List_EffectivePermissions_PAG70123456"
+  assert guard_tool_name(_tools("List_Customers_PAG30009")) is None
+  assert guard_tool_name(_tools("bc_actions_search")) is None
+
+
+def test_parse_guard_rows_needs_the_guard_shape() -> None:
+  assert parse_guard_rows(_guard_text()) is not None
+  assert parse_guard_rows("Returned all 1 record.\n" + json.dumps({"value": [{"number": "10000"}]})) is None
+  assert parse_guard_rows("No results found.") is None
+  assert parse_guard_rows(DENIAL_TEXT) is None
+
+
+def test_verdicts_from_guard() -> None:
+  outcome = verdicts_from_guard(_guard_rows())
+  assert outcome.source == "bc-mcp-guard"
+  assert set(outcome.denied) == {"30017", "30008"}
+  assert outcome.denied["30017"].object_label == "TableData 5200 Employee"
+  assert outcome.denied["30008"].permission == "Execute"
+  assert outcome.denied_verbs == {"30009": {"Create", "Delete"}}
+  assert outcome.allowed == set()  # readable pages are never marked allowed
+  assert outcome.filtered_pages == {"30009": "Customer: No.=10000"}
+
+
+def test_registry_hides_write_verbs_individually_and_never_the_guard() -> None:
+  registry = PermissionRegistry()
+  outcome = verdicts_from_guard(_guard_rows())
+  registry.replace(outcome.denied, outcome.allowed, outcome.denied_verbs, source=outcome.source)
+  listed = _tools("List_Customers_PAG30009", "Create_Customers_PAG30009", "ListUpdate_Customers_PAG30009",
+                  "Delete_Customers_PAG30009", "List_Employees_PAG30017", "List_Items_PAG30008",
+                  "Create_Items_PAG30008", "List_EffectivePermissions_PAG50100")
+  assert [t.name for t in registry.filter(listed).tools] == [
+      "List_Customers_PAG30009", "ListUpdate_Customers_PAG30009", "List_EffectivePermissions_PAG50100"]
+  assert registry.source == "bc-mcp-guard"
+  assert "2 write tool(s) hidden on 1 readable page(s)" in registry.summary()
+  # a live denial on a readable page still hides it
+  assert registry.mark_denied("30009", _denial()) is True
+  assert registry.is_hidden("List_Customers_PAG30009")
+
+
+async def test_read_guard_permissions_uses_one_call_with_a_large_top() -> None:
+  calls: list[tuple[str, dict[str, Any]]] = []
+
+  async def call(name: str, args: dict[str, Any]) -> CallToolResult:
+    calls.append((name, args))
+    return CallToolResult(content=[TextContent(type="text", text=_guard_text())], isError=False)
+
+  listed = _tools("List_Customers_PAG30009", "List_EffectivePermissions_PAG50100")
+  outcome = await read_guard_permissions(call, listed, timeout=1.0)
+  assert outcome is not None and set(outcome.denied) == {"30017", "30008"}
+  assert calls == [("List_EffectivePermissions_PAG50100", {"top": 5000})]
+
+
+async def test_read_guard_permissions_falls_back_when_absent_or_broken() -> None:
+  async def denied(name: str, args: dict[str, Any]) -> CallToolResult:
+    return CallToolResult(content=[TextContent(type="text", text=DENIAL_TEXT)], isError=True)
+
+  async def garbage(name: str, args: dict[str, Any]) -> CallToolResult:
+    return CallToolResult(content=[TextContent(type="text", text="No results found.")], isError=False)
+
+  async def boom(name: str, args: dict[str, Any]) -> CallToolResult:
+    raise RuntimeError("network")
+
+  assert await read_guard_permissions(garbage, _tools("List_Customers_PAG30009"), timeout=1.0) is None
+  guard_list = _tools("List_EffectivePermissions_PAG50100")
+  assert await read_guard_permissions(denied, guard_list, timeout=1.0) is None
+  assert await read_guard_permissions(garbage, guard_list, timeout=1.0) is None
+  assert await read_guard_permissions(boom, guard_list, timeout=1.0) is None
