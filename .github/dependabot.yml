@@ -16,6 +16,17 @@ updates:
     labels:
       - "dependencies"
       - "python"
+    ignore:
+      # The mcp 2.x line drops the two client APIs this proxy is built on:
+      # mcp.client.streamable_http.streamablehttp_client and
+      # mcp.shared.exceptions.McpError. Both pyproject.toml and
+      # dxt/requirements.in therefore cap at <2.0.0. A major bump here is not a
+      # version-pin question but a port of proxy.py to the 2.x client surface,
+      # so it should be opened deliberately rather than arriving weekly and
+      # failing at import time. Minor and patch updates within 1.x still come
+      # through the mcp-stack group below.
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
     groups:
       mcp-stack:
         patterns:
