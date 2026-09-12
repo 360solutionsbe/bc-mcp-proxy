@@ -447,6 +447,8 @@ Pre-built bundles for these three platforms are attached to every GitHub Release
 
 ## Security
 
+> **Does MCP respect Business Central permissions?** Yes: Microsoft's MCP server runs every call under the signed-in user's identity, so permission sets, security filters, licence entitlements and the MCP configuration all apply unchanged. Version 0.9.0 will add clear denial messages and an option to hide tools the user cannot use. Read the full write-up with Microsoft's sources and our measurements: [Security model](https://vangeldersolutions.github.io/bc-mcp-proxy/security-model/) (source: [`docs/security-model.md`](docs/security-model.md)).
+
 - **No application secrets.** Delegated permissions only via the device-code flow. No client secret to manage or rotate.
 - **Tokens cached locally** via `msal-extensions` with OS-specific secure storage (DPAPI on Windows, Keychain on macOS, libsecret on Linux). No plaintext on disk.
 - **No tokens in logs.** The proxy never logs access or refresh tokens; debug output contains only expiry timestamps for diagnosis.
