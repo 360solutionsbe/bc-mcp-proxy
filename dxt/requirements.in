@@ -43,7 +43,7 @@ pywin32; sys_platform == "win32"
 # happily pick transitives that have dropped our floor of 3.10. The .dxt build
 # vendors a cp310 wheel set and fails hard when a pin has no 3.10 wheel, so cap
 # anything that has moved past us. Revisit if requires-python is ever raised.
-rpds-py<2026                 # 2026.x is requires-python >=3.11
+rpds-py<2027                 # 2026.x is requires-python >=3.11
 
 # --- Transitive security floors (Snyk-flagged CVEs) ---------------------------
 # These packages are pulled in by mcp / msal / httpx but ship vulnerable

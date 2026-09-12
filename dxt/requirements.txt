@@ -93,7 +93,7 @@ requests==2.34.2
     # via
     #   -r requirements.in
     #   msal
-rpds-py==0.30.0
+rpds-py==2026.6.3
     # via
     #   -r requirements.in
     #   jsonschema
