@@ -1,0 +1,266 @@
+{
+  "measuredOn": "2026-09-12",
+  "server": "Microsoft Dynamics 365 Business Central 28.0.54016.0",
+  "environmentType": "Sandbox (BE localisation, user language EN)",
+  "restrictedUserPermissionSets": [
+    "LOGIN",
+    "LOCAL",
+    "AUTOMATE - EXEC",
+    "EXCEL EXPORT ACTION",
+    "D365 ITEM, EDIT",
+    "E-INVOICING USER"
+  ],
+  "notes": [
+    "Keys are lower-case (error/code/message) unlike the Internal_CompanyNotFound payload measured in August 2026 (Error/Code/Message); detection must be case-insensitive.",
+    "The same shape is returned by static List_* tools and by bc_actions_invoke; bc_actions_search and bc_actions_describe succeed for the restricted user.",
+    "Sub-pages that need a parent id answer BadRequest_NotFound before any permission check; those are not denials.",
+    "With D365 BASIC assigned the denial names the table instead of the page: '(TableData 5200 Employee Read: _Exclude_APIV2_)'. Without it every API page fails with '(Page 30009 APIV2 - Customers Execute: _Exclude_APIV2_)'.",
+    "The automation API's expandedPermissionSets does not expose security filters (the Customer line of the filtered set reports readPermission Yes and no filter field); only the Permission Set page shows them."
+  ],
+  "denials": [
+    {
+      "mode": "dynamic",
+      "tool": "bc_actions_invoke",
+      "arguments": {
+        "ActionName": "List_Customers_PAG30009",
+        "RequestParameters": "{\"top\": 1}"
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (Page 30009 APIV2 - Customers Execute: _Exclude_APIV2_)\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "dynamic",
+      "tool": "bc_actions_invoke",
+      "arguments": {
+        "ActionName": "List_Items_PAG30008",
+        "RequestParameters": "{\"top\": 1}"
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (Page 30008 APIV2 - Items Execute: _Exclude_APIV2_)\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "dynamic",
+      "tool": "bc_actions_invoke",
+      "arguments": {
+        "ActionName": "List_Employees_PAG30017",
+        "RequestParameters": "{\"top\": 1}"
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (Page 30017 APIV2 - Employees Execute: _Exclude_APIV2_)\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "static",
+      "tool": "List_Workflows_PAG2145",
+      "arguments": {
+        "top": 1
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (Page 2145 APIV2 - Workflows Execute: _Exclude_APIV2_)\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "static",
+      "tool": "List_WorkflowSteps_PAG2147",
+      "arguments": {
+        "top": 1
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (Page 2147 APIV2 - Workflow Steps Execute: _Exclude_APIV2_)\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "static",
+      "tool": "List_WorkflowResponseOptions_PAG2146",
+      "arguments": {
+        "top": 1
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (Page 2146 APIV2 - Workflow Resp. Options Execute: _Exclude_APIV2_)\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "static (user has D365 BASIC; table-level)",
+      "tool": "List_DocumentAttachments_PAG30080",
+      "arguments": {
+        "top": 1
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (TableData 120 Purch. Rcpt. Header Read: Base Application)\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "static (user has D365 BASIC; table-level)",
+      "tool": "List_CustomerFinancialDetails_PAG30048",
+      "arguments": {
+        "top": 1
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (TableData 21 Cust. Ledger Entry IndirectRead: _Exclude_APIV2_)\\r\\n\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "static (user has D365 BASIC; table-level)",
+      "tool": "List_AgedAccountsReceivables_PAG30031",
+      "arguments": {
+        "top": 1
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"Internal_ServerError\",\r\n    \"message\": \"Sorry, the current permissions prevented the action. (TableData 21 Cust. Ledger Entry Read: Base Application)\"\r\n  }\r\n}"
+      ]
+    }
+  ],
+  "nonDenials": [
+    {
+      "mode": "static",
+      "tool": "List_WorkflowStepsOfWorkflow_PAG2147",
+      "arguments": {
+        "top": 1
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"BadRequest_NotFound\",\r\n    \"message\": \"Bad Request - Error in query syntax.\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "static",
+      "tool": "List_WorkflowResponseOptionsOfWorkflowStep_PAG2146",
+      "arguments": {
+        "top": 1
+      },
+      "isError": true,
+      "text": [
+        "{\r\n  \"error\": {\r\n    \"code\": \"BadRequest_NotFound\",\r\n    \"message\": \"Bad Request - Error in query syntax.\"\r\n  }\r\n}"
+      ]
+    },
+    {
+      "mode": "dynamic (admin, allowed)",
+      "tool": "bc_actions_invoke",
+      "arguments": {
+        "ActionName": "List_Customers_PAG30009",
+        "RequestParameters": "{\"top\": 1}"
+      },
+      "isError": false,
+      "text": [
+        "Returned 1 of 7 total records. Use 'top' and 'skip' in 'RequestParameters' to paginate. …",
+        "{\"@odata.count\":7,\"value\":[{\"@odata.etag\":\"W/\\u0022JzIwOzE3MzQ0OTMwNDYzOTU2MTkwNDkyMTswMDsn\\u0022\",\"id\":\"175811d3-8e29-f111-9f2c-7ced8d3f8065\",\"number\":\"10000\", …"
+      ]
+    }
+  ],
+  "measurements": {
+    "adminSUPER": {
+      "listToolsProbed": 412,
+      "ok": 129,
+      "structuralErrors": 283,
+      "permissionDenials": 0
+    },
+    "restrictedNoBasic": {
+      "permissionSets": [
+        "LOGIN",
+        "LOCAL",
+        "AUTOMATE - EXEC",
+        "EXCEL EXPORT ACTION",
+        "D365 ITEM, EDIT",
+        "E-INVOICING USER"
+      ],
+      "ok": 0,
+      "structuralErrors": 270,
+      "permissionDenials": 142,
+      "denialKind": "Page ... Execute"
+    },
+    "restrictedWithBasic": {
+      "permissionSets": [
+        "...same plus D365 BASIC"
+      ],
+      "ok": 106,
+      "structuralErrors": 283,
+      "permissionDenials": 23,
+      "denialKind": "TableData ... Read",
+      "deniedPages": [
+        "List_Accounts_PAG30014",
+        "List_AgedAccountsPayables_PAG30032",
+        "List_AgedAccountsReceivables_PAG30031",
+        "List_BankAccounts_PAG30051",
+        "List_CustomerContacts_PAG30089",
+        "List_CustomerFinancialDetails_PAG30048",
+        "List_DocumentAttachments_PAG30080",
+        "List_Employees_PAG30017",
+        "List_FixedAssetLocations_PAG30097",
+        "List_FixedAssets_PAG30098",
+        "List_GeneralLedgerEntries_PAG30018",
+        "List_Opportunities_PAG30070",
+        "List_Projects_PAG30050",
+        "List_PurchaseReceiptLines_PAG30065",
+        "List_PurchaseReceipts_PAG30064",
+        "List_SalesShipmentLines_PAG30063",
+        "List_SalesShipments_PAG30062",
+        "List_TransferOrders_PAG30204",
+        "List_TransferReceiptLines_PAG30209",
+        "List_TransferReceipts_PAG30208",
+        "List_TransferShipmentLines_PAG30207",
+        "List_TransferShipments_PAG30206",
+        "List_TrialBalances_PAG30034"
+      ]
+    },
+    "restrictedWithSecurityFilter": {
+      "permissionSets": [
+        "LOGIN",
+        "LOCAL",
+        "AUTOMATE - EXEC",
+        "EXCEL EXPORT ACTION",
+        "E-INVOICING USER",
+        "MCP TEST LIMITED (tenant copy of D365 BASIC with security filter Customer No.=10000)"
+      ],
+      "listToolsProbed": 412,
+      "ok": 102,
+      "structuralErrors": 283,
+      "permissionDenials": 27,
+      "deniedPagesBeyondRestrictedWithBasic": [
+        "List_AssemblyOrderLines_PAG30225",
+        "List_AssemblyOrders_PAG30224",
+        "List_ItemCategories_PAG30025",
+        "List_TransferOrderLines_PAG30205"
+      ],
+      "deniedPagesBeyondExplanation": "D365 ITEM, EDIT was not assigned during this run; these four pages need item-related table permissions that D365 BASIC lacks.",
+      "customersThroughFilter": {
+        "count": 1,
+        "numbers": [
+          "10000"
+        ]
+      },
+      "dynamicInvoke": {
+        "List_Customers_PAG30009": {
+          "result": "ok",
+          "returned": 1,
+          "total": 1
+        },
+        "List_SalesOrders_PAG30028": {
+          "result": "ok",
+          "returned": 10,
+          "total": 23
+        },
+        "List_Items_PAG30008": {
+          "result": "ok",
+          "returned": 10,
+          "total": 82
+        },
+        "List_Employees_PAG30017": {
+          "result": "denied",
+          "message": "Sorry, the current permissions prevented the action. (TableData 5200 Employee Read: _Exclude_APIV2_)"
+        }
+      },
+      "note": "Security filter on Customer (No.=10000) reduced List_Customers_PAG30009 to 1 of 7 rows in both static and dynamic mode; records outside the filter are absent, not refused. The filter does not cascade: sales orders, quotes and invoices of other customers stay visible until Sales Header (and posted document tables) get their own filter. The filter took effect within minutes of saving the permission set, without a new sign-in."
+    }
+  }
+}
