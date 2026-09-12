@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 from typing import Optional
 
@@ -129,7 +130,37 @@ def main(argv: list[str] | None = None) -> None:
         f"ERROR: invalid auth mode {config.auth_mode!r}. "
         f"Expected one of: {', '.join(AUTH_MODES)}.\n")
     sys.exit(2)
+  problem = _guid_problem(config)
+  if problem is not None:
+    sys.stderr.write(f"ERROR: {problem}\n")
+    sys.exit(2)
   run_sync(config)
+
+
+_GUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def _guid_problem(config: ProxyConfig) -> Optional[str]:
+  """One actionable sentence if tenant_id / client_id is not a GUID, else None.
+
+  Without this, a tenant ID that lost its last character when pasted into
+  the extension settings surfaces as an MSAL traceback ending in
+  AADSTS90002 "Tenant not found", which reads like an Entra outage rather
+  than a typo. Skipped when a custom auth header is used (no MSAL then).
+  """
+  if config.custom_auth_header:
+    return None
+  for label, value in (("Tenant ID", config.tenant_id), ("Client ID", config.client_id)):
+    if not value:
+      return (f"{label} is required. Copy it from the Entra admin center "
+              "(App registrations > Overview) and set it in the extension settings, "
+              f"--{label.replace(' ', '')} or BC_{label.upper().replace(' ', '_')}.")
+    if not _GUID_RE.fullmatch(value):
+      return (f"{label} {value!r} is not a valid GUID: expected 36 characters in the form "
+              f"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, got {len(value)}. "
+              "Re-copy it from the Entra admin center (App registrations > Overview); "
+              "a pasted value often loses its first or last character.")
+  return None
 
 
 def _config_from_env() -> dict[str, Optional[str]]:
