@@ -10,9 +10,10 @@ dist/
 *.egg
 wheels/
 
-# DXT bundle build output
+# MCPB / DXT bundle build output
 dxt/build/
 *.dxt
+*.mcpb
 
 # Virtual environments
 .venv/

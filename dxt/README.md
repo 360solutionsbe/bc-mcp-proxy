@@ -1,15 +1,16 @@
-# Claude Desktop Extension (.dxt) packaging
+# Claude Desktop Extension (.mcpb) packaging
 
 This directory contains everything needed to build a Claude Desktop Extension
-bundle from the proxy. The resulting `.dxt` file is a one-click install for
-Claude Desktop and can later be submitted to Anthropic's Extensions Directory.
+bundle from the proxy. The resulting `.mcpb` file (MCP Bundle, the successor of
+`.dxt`) is a one-click install for Claude Desktop and is what gets submitted to
+Anthropic's Connectors Directory as a desktop extension.
 
 ## What's here
 
 | File              | Purpose                                                                                       |
 |-------------------|-----------------------------------------------------------------------------------------------|
-| `manifest.json`   | The DXT manifest. Defines metadata, the user_config schema (TenantId, ClientId, Environment, Company, …) and how Claude Desktop should launch the proxy. |
-| `requirements.txt`| Python dependencies that Claude Desktop installs into the extension's runtime.                |
+| `manifest.json`   | The MCPB manifest (`manifest_version` 0.3). Defines metadata, the privacy-policy URL, the user_config schema (TenantId, ClientId, Environment, Company, …) and how Claude Desktop should launch the proxy. |
+| `requirements.txt`| pip-compiled lockfile of every Python dependency; the build vendors these as wheels into the bundle. Compile it on Linux (see `requirements.in`). |
 | `build.ps1`       | PowerShell build script (Windows / cross-platform via `pwsh`).                                |
 | `build.sh`        | POSIX shell build script (macOS / Linux).                                                     |
 | `icon.png`        | 512×512 PNG extension icon; `icon-256.png` is the 256×256 variant. Both are rendered by `icon_source/render_icon.py` from the Vangelder Solutions V5 brand (Archivo outlines, navy, green rule) — never hand-edit the PNGs. |
@@ -28,32 +29,36 @@ pwsh dxt/build.ps1
 
 The script:
 1. Stages `manifest.json`, `requirements.txt`, the `bc_mcp_proxy` package and `LICENSE` into `dxt/build/`.
-2. Packs that staging directory into `dist/bc-mcp-proxy-<version>.dxt` using the `@anthropic-ai/mcpb` CLI (formerly `@anthropic-ai/dxt`; via `npx` if neither `mcpb` nor `dxt` is on PATH).
+2. Vendors wheels for Python 3.10–3.14 of the host platform under `server/wheels/cp3XY/`.
+3. Packs that staging directory into `dist/vgs-bc-mcp-<version>-<platform>.mcpb` using the `@anthropic-ai/mcpb` CLI (via `npx` if `mcpb` is not on PATH).
 
-The build artifact (`dist/*.dxt` and `dxt/build/`) is git-ignored.
+The build artifacts (`dist/*.mcpb` and `dxt/build/`) are git-ignored.
 
 ## Installing locally
 
-Drag the `.dxt` file onto Claude Desktop (or open Settings → Extensions → Install from file). Claude Desktop will:
+Double-click the `.mcpb` file (or open Settings → Extensions → Install from file). Claude Desktop will:
 
-1. Prompt for each `user_config` value (Tenant ID, Client ID, Environment, Company, optional Configuration Name, log level).
-2. Install Python dependencies from `requirements.txt` into a managed runtime.
-3. Launch the server on demand using the `mcp_config.command` + `args` from the manifest, substituting the user-config values.
+1. Prompt for each `user_config` value (Tenant ID, Client ID, Environment, Company, optional Configuration Name, log level, endpoint, auth mode).
+2. Launch the proxy on demand with the system `python3` / `python`, using the `mcp_config.command` + `args` from the manifest and the vendored wheels on `PYTHONPATH`.
 
-The first BC tool call triggers the standard MSAL device-code login (the bundled proxy is unchanged from the standalone CLI version).
+The first BC tool call triggers the sign-in (browser, with device-code fallback); the bundled proxy is the same code as the PyPI package.
 
-## Publishing
+## Publishing to Anthropic's Connectors Directory
 
-To submit to the Anthropic Extensions Directory:
+Desktop extensions are submitted through Anthropic's desktop-extension form (<https://clau.de/desktop-extention-submission>), not the remote-connector portal. Before submitting a release:
 
 1. Regenerate `dxt/icon.png` and `dxt/icon-256.png` with `python dxt/icon_source/render_icon.py <Archivo-Variable.ttf>` when the brand changes. The icon is original Vangelder Solutions artwork; the Business Central logo itself is a Microsoft trademark and must not be used as a product icon.
-2. Make sure the `homepage`, `repository`, `support` and `documentation` URLs in `manifest.json` resolve.
-3. Ship a public version on GitHub (the fork is currently private).
-4. Follow the submission instructions at <https://github.com/anthropics/dxt> (typically a PR adding the extension's manifest URL to the directory index).
+2. Keep `privacy_policies` in `manifest.json` and the README's *Privacy Policy* section pointing at https://vangeldersolutions.github.io/bc-mcp-proxy/privacy/ (source `docs/privacy.md`, published with GitHub Pages). A missing or incomplete privacy policy is an immediate rejection.
+3. Every tool must carry `title` and `readOnlyHint`/`destructiveHint`; the proxy adds them for BC's tools (see the README). Names must be ≤ 64 characters.
+4. Test the bundle on Windows **and** macOS, and run every tool once (MCP Inspector or Claude Desktop) — the form asks you to confirm this.
+5. Have ready: the release asset URL of the `.mcpb`, the repository URL, the documentation URL (README), the privacy-policy URL, a support contact, at least three example prompts, and a fully populated test account (BC sandbox + Entra app + user) for the reviewer. Never commit test credentials.
+6. Bump the version in `bc_mcp_proxy/_version.py`, `pyproject.toml` and `dxt/manifest.json` together, merge, push the `v*.*.*` tag; the release workflow attaches the three bundles plus `SHA256SUMS.txt`.
+
+Review criteria: <https://claude.com/docs/connectors/building/review-criteria>. Questions or escalations: mcp-review@anthropic.com.
 
 ## Verifying the manifest
 
-The DXT CLI ships a validator:
+The MCPB CLI ships a validator:
 
 ```bash
 npx --yes @anthropic-ai/mcpb validate dxt/manifest.json

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build a .dxt bundle for Claude Desktop from the current source tree.
+# Build a .mcpb bundle (MCP Bundle, formerly .dxt) for Claude Desktop from the current source tree.
 #
 # Usage (from the repo root):
 #   ./dxt/build.sh
 #
-# Output: dist/bc-mcp-proxy-<version>-<platform>.dxt
+# Output: dist/vgs-bc-mcp-<version>-<platform>.mcpb
 #
 # What this does:
 #   1. Stages the proxy source under dxt/build/server/bc_mcp_proxy.
@@ -28,7 +28,7 @@ cd "$repo_root"
 
 version="$(awk -F\" '/^__version__/ {print $2; exit}' bc_mcp_proxy/_version.py)"
 if [[ -z "${version:-}" ]]; then
-  echo "Could not determine package version from bc_mcp_proxy/__init__.py." >&2
+  echo "Could not determine package version from bc_mcp_proxy/_version.py." >&2
   exit 1
 fi
 
@@ -56,7 +56,7 @@ esac
 
 build_dir="$repo_root/dxt/build"
 dist_dir="$repo_root/dist"
-bundle="$dist_dir/bc-mcp-proxy-$version-$platform_tag.dxt"
+bundle="$dist_dir/vgs-bc-mcp-$version-$platform_tag.mcpb"
 
 rm -rf "$build_dir"
 mkdir -p "$build_dir/server" "$dist_dir"

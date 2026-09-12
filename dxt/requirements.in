@@ -5,9 +5,9 @@
 #
 #     python -m piptools compile dxt/requirements.in --strip-extras --resolver=backtracking -o dxt/requirements.txt
 #
-# Or via the convenience script:
+# From Windows, run it inside WSL Ubuntu (see below why Linux):
 #
-#     python scripts/compile_requirements.py
+#     wsl -e bash -lc 'cd "/mnt/f/.../bc-mcp-proxy" && pip-compile --upgrade --output-file=dxt/requirements.txt --strip-extras dxt/requirements.in'
 #
 # The lockfile is what Snyk scans (and what the build script vendors into
 # the .dxt). Pinning every transitive eliminates the discrepancy between

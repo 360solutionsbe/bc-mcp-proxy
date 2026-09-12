@@ -1,0 +1,6 @@
+title: Business Central MCP Proxy (vgs-bc-mcp)
+description: Documentation and privacy policy for the vgs-bc-mcp Claude Desktop extension by Vangelder Solutions
+theme: jekyll-theme-minimal
+show_downloads: false
+exclude:
+  - README.md

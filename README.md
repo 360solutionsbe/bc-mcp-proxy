@@ -25,20 +25,22 @@
 
 ## Quick install (Claude Desktop)
 
-Pre-built `.dxt` bundles are published on each release with all Python dependencies vendored — no `pip install` step required.
+Pre-built `.mcpb` bundles (MCP Bundle, the successor of the `.dxt` format — older `.dxt` releases still install) are published on each release with all Python dependencies vendored — no `pip install` step required.
 
 1. **Download** the bundle for your platform from the [latest release](https://github.com/VangelderSolutions/bc-mcp-proxy/releases/latest):
 
    | Platform | Asset |
    |---|---|
-   | Windows 64-bit | `bc-mcp-proxy-<version>-win-amd64.dxt` |
-   | macOS Apple Silicon | `bc-mcp-proxy-<version>-darwin-arm64.dxt` |
-   | Linux x86_64 | `bc-mcp-proxy-<version>-linux-x86_64.dxt` |
+   | Windows 64-bit | `vgs-bc-mcp-<version>-win-amd64.mcpb` |
+   | macOS Apple Silicon | `vgs-bc-mcp-<version>-darwin-arm64.mcpb` |
+   | Linux x86_64 | `vgs-bc-mcp-<version>-linux-x86_64.mcpb` |
+
+   Every release also ships `SHA256SUMS.txt` so you can verify the download.
 
    *Intel macOS (`x86_64`) is not shipped as a pre-built asset — Apple Silicon has been the default since 2020 and the audience for Intel-only Macs is vanishing. Intel Mac users can build from source via `./dxt/build.sh` (any Mac with Python 3.10+).*
 
 2. **Double-click** the downloaded file. Claude Desktop opens an install dialog.
-3. **Fill in** Tenant ID, Client ID, Environment, Company, (optional) Configuration Name. The defaults already point at the BC v28 endpoint; override via the *Business Central MCP endpoint* field for v26/v27.
+3. **Fill in** Tenant ID, Client ID, Environment, Company, (optional) Configuration Name. The defaults already point at the BC v28/v29 endpoint; override via the *Business Central MCP endpoint* field for v26/v27.
 4. **Restart Claude Desktop.**
 
 That's the whole install. The Azure App Registration setup is the only remaining step — see [Step 1 — Azure App Registration](#step-1--azure-app-registration) below, or contact us via the [Need help?](#need-help) section if you'd prefer it done for you.
@@ -92,7 +94,7 @@ The proxy is the translator:
 | **BC environment** | Version 28.0 or later recommended (v29 supported); v26/v27 still work on the legacy endpoint. Sandbox or production. Read-only access to all API pages works out of the box; writes need an MCP Server Configuration with **Unblock Edit Tools** on. |
 | **Microsoft Entra (Azure AD) tenant** | With **administrator** rights — you'll create an App Registration and grant API permissions. |
 | **An AI client** | Claude Desktop (free), VS Code with MCP support, Cursor, or any other stdio-MCP capable tool. |
-| **Python 3.10+** on your machine | Claude Desktop launches the proxy with the system `python3`. The DXT bundle vendors all Python dependencies internally (Windows `cp310-win_amd64` wheels), so no separate `pip install` is required. |
+| **Python 3.10+** on your machine | Claude Desktop launches the proxy with the system `python3`. The `.mcpb` bundle vendors all Python dependencies internally (wheels for Python 3.10–3.14 of the host platform), so no separate `pip install` is required. |
 
 ---
 
@@ -168,8 +170,8 @@ python -m pip install --upgrade vgs-bc-mcp
 > Both distributions ship the same `bc_mcp_proxy` files, so having them installed side by side
 > means uninstalling either one takes the other's files with it. Keep only the new one.
 >
-> The import package (`bc_mcp_proxy`), the `python -m bc_mcp_proxy` command and the `.dxt`
-> filenames are unchanged, so existing MCP client configurations keep working.
+> The import package (`bc_mcp_proxy`) and the `python -m bc_mcp_proxy` command are unchanged, so
+> existing MCP client configurations keep working. Bundle files are named `vgs-bc-mcp-<version>-<platform>.mcpb` since 0.8.0 (previously `bc-mcp-proxy-…​.dxt`).
 
 Or from source:
 
@@ -299,6 +301,26 @@ Both modes return the same data. Which one to choose depends on how big your BC 
 
 ---
 
+## Example prompts
+
+These work against a standard CRONUS demo company with the default read-only MCP access (no configuration needed):
+
+1. *"List my customers and show the five with the highest balance due."*
+2. *"Which items are below their reorder point? Include inventory and vendor."*
+3. *"Show the open sales orders for customer 10000 with their amounts and shipment dates."*
+4. *"What were total posted sales invoices per month this year?"*
+
+With an MCP configuration that has **Unblock Edit Tools** on, writes work too — Claude asks for confirmation before each one because the proxy marks those tools as destructive:
+
+5. *"Create a new customer called Acme Trading in Antwerp with payment terms 30 days."*
+
+### Known limitations
+
+- The first request after Business Central has been idle can take 30–60 s server-side; the proxy answers `tools/list` from cache meanwhile, but the first *data* call waits for BC.
+- In dynamic tool mode `bc_actions_invoke` performs reads and writes through one tool, so Claude will ask for confirmation on every call to it. Use static mode (explicit `List…`/`Create…` tools) if you want reads to run without prompts.
+- Business Central online throttles per user (6000 requests / 5 min, 5 concurrent). The proxy backs off and retries, so bulk questions may take longer rather than fail.
+- Only Business Central **online** is supported; on-premises has no MCP server.
+
 ## Static vs Dynamic Tool Mode
 
 | | **Static** | **Dynamic** |
@@ -400,22 +422,22 @@ The CLI surface and on-disk configuration layout are unchanged so this is a drop
 
 ## Claude Desktop Extension
 
-A `.dxt` bundle for one-click install in Claude Desktop is built from the source in [`dxt/`](dxt/README.md):
+A `.mcpb` bundle (MCP Bundle) for one-click install in Claude Desktop is built from the source in [`dxt/`](dxt/README.md):
 
 ```bash
 pwsh dxt/build.ps1     # Windows
 ./dxt/build.sh         # macOS / Linux
 ```
 
-The output (`dist/bc-mcp-proxy-<version>-<platform>.dxt`) installs into Claude Desktop, prompts for tenant ID / client ID / environment / company / configuration name, and runs the same proxy as the CLI version.
+The output (`dist/vgs-bc-mcp-<version>-<platform>.mcpb`) installs into Claude Desktop, prompts for tenant ID / client ID / environment / company / configuration name, and runs the same proxy as the CLI version.
 
-**Self-contained bundle.** The build script vendors all Python dependencies (`mcp`, `httpx`, `msal`, plus the security-floor pins) into the bundle as Python-3.10 wheels matching the host platform. Claude Desktop launches the proxy with the system `python3` and the bundled deps take precedence over anything in the system's site-packages, so no separate `pip install` is required on the install side. Each platform has its own bundle:
+**Self-contained bundle.** The build script vendors all Python dependencies (`mcp`, `httpx`, `msal`, plus the security-floor pins) into the bundle as wheels for Python 3.10 through 3.14 matching the host platform. Claude Desktop launches the proxy with the system `python3` and the bundled deps take precedence over anything in the system's site-packages, so no separate `pip install` is required on the install side. Each platform has its own bundle:
 
 | Platform | Filename pattern |
 |---|---|
-| Windows 64-bit | `bc-mcp-proxy-<version>-win-amd64.dxt` |
-| macOS Apple Silicon | `bc-mcp-proxy-<version>-darwin-arm64.dxt` |
-| Linux x86_64 | `bc-mcp-proxy-<version>-linux-x86_64.dxt` |
+| Windows 64-bit | `vgs-bc-mcp-<version>-win-amd64.mcpb` |
+| macOS Apple Silicon | `vgs-bc-mcp-<version>-darwin-arm64.mcpb` |
+| Linux x86_64 | `vgs-bc-mcp-<version>-linux-x86_64.mcpb` |
 
 Pre-built bundles for these three platforms are attached to every GitHub Release. Intel macOS (`darwin-x86_64`) isn't in the official matrix; Intel Mac users can run `./dxt/build.sh` on their own machine to produce a matching bundle. Building on each target platform's host (a Windows machine for the Windows bundle, etc.) is what the release CI does — wheels for `cryptography` are platform-specific.
 
@@ -431,7 +453,11 @@ Pre-built bundles for these three platforms are attached to every GitHub Release
 
 ---
 
-## Privacy & Anthropic subscription
+## Privacy Policy
+
+The privacy policy for this software and the Claude Desktop extension is published at **https://vangeldersolutions.github.io/bc-mcp-proxy/privacy/** (source: [`docs/privacy.md`](docs/privacy.md)). In short: the proxy runs on your own device, talks only to Microsoft Entra ID and your Business Central environment, keeps tokens (OS-encrypted) and a tools cache locally, collects no telemetry, and sends nothing to Vangelder Solutions.
+
+### Anthropic subscription
 
 When you use this proxy, your BC queries and the data returned in response are processed by whichever AI provider your MCP client is wired to — most commonly Anthropic's Claude. **The subscription tier you pick (Team / Enterprise / API vs Free / Pro / Max) materially changes how that data is retained and whether it can be used for model training**, and it determines whether a Data Processing Addendum is available — which matters for GDPR if you are established in the EU/EEA.
 
@@ -475,7 +501,9 @@ One appointment (online or on-site), configuration done, MCP working in your pro
 - [Configure Business Central MCP Server](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/ai/configure-mcp-server) — Microsoft Learn
 - [Analyze MCP Server Tool Calls Telemetry](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/administration/telemetry-mcp-server-trace) — RT0054 event reference
 - [Model Context Protocol specification](https://modelcontextprotocol.io) — Anthropic
-- [Claude Desktop Extensions (DXT)](https://github.com/anthropics/dxt) — for one-click install bundles
+- [MCP Bundles (MCPB)](https://github.com/modelcontextprotocol/mcpb) — the one-click install format for Claude Desktop
+- [Submitting to the Connectors Directory](https://claude.com/docs/connectors/building/submission) — Anthropic's review criteria and desktop-extension submission form
+- [Connect to Business Central MCP server with non-Microsoft hosts](https://learn.microsoft.com/dynamics365/business-central/dev-itpro/ai/use-mcp-server-non-microsoft) — Microsoft Learn (headers, Base64 encoding, app registration)
 
 ---
 

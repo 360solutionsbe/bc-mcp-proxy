@@ -1,10 +1,10 @@
 {
-  "dxt_version": "0.1",
+  "manifest_version": "0.3",
   "name": "vgs-bc-mcp",
   "display_name": "Business Central MCP Proxy",
-  "version": "0.7.0",
-  "description": "Bridge Claude Desktop to a Microsoft Dynamics 365 Business Central environment via the official BC MCP endpoint.",
-  "long_description": "Resilient stdio MCP proxy that forwards tool calls from Claude Desktop to the Business Central MCP HTTP endpoint. Forked from microsoft/BCTech samples/BcMCPProxyPython with production fixes: interactive browser sign-in (device-code fallback), non-blocking tool discovery (no 30s first-call hang) that emits tools/list_changed, reconnect on transient httpx errors with exponential backoff, pre-emptive MSAL silent token refresh, surfacing of upstream errors that arrive masked as successful responses, retry with backoff on Business Central rate limits (429/503), Base64 encoding of non-ASCII company/configuration names (MCP SEP-2243), tool annotations (read-only vs destructive) so Claude can auto-approve reads, and pass-through of resources and prompts for BC v28 and v29 (2026 release wave 2). Interactive sign-in requires 'http://localhost' added to the Azure app registration under Authentication > Mobile and desktop applications. Maintained by Vangelder Solutions. Tenant ID, client ID, environment, company and configuration name are configured at install time via the prompts below.",
+  "version": "0.8.0",
+  "description": "Bridge Claude Desktop to your Microsoft Dynamics 365 Business Central environment through Microsoft's official Business Central MCP server.",
+  "long_description": "Resilient stdio MCP proxy that forwards tool calls from Claude Desktop to the Business Central MCP HTTP endpoint. Forked from microsoft/BCTech samples/BcMCPProxyPython with production fixes: interactive browser sign-in (device-code fallback), non-blocking tool discovery (no 30s first-call hang) that emits tools/list_changed, reconnect on transient httpx errors with exponential backoff, pre-emptive MSAL silent token refresh, surfacing of upstream errors that arrive masked as successful responses, retry with backoff on Business Central rate limits (429/503), Base64 encoding of non-ASCII company/configuration names (MCP SEP-2243), tool annotations (read-only vs destructive) so Claude can auto-approve reads, and pass-through of resources and prompts for BC v28 and v29 (2026 release wave 2). Interactive sign-in requires 'http://localhost' added to the Azure app registration under Authentication > Mobile and desktop applications. Maintained by Vangelder Solutions, an independent Microsoft partner; not affiliated with Microsoft or Anthropic. Tenant ID, client ID, environment, company and configuration name are configured at install time via the prompts below. Privacy policy: https://vangeldersolutions.github.io/bc-mcp-proxy/privacy/",
   "author": {
     "name": "Vangelder Solutions",
     "email": "support@vangeldersolutions.be",
@@ -12,6 +12,9 @@
   },
   "homepage": "https://github.com/VangelderSolutions/bc-mcp-proxy",
   "documentation": "https://github.com/VangelderSolutions/bc-mcp-proxy#readme",
+  "privacy_policies": [
+    "https://vangeldersolutions.github.io/bc-mcp-proxy/privacy/"
+  ],
   "support": "https://github.com/VangelderSolutions/bc-mcp-proxy/issues",
   "repository": {
     "type": "git",
@@ -19,6 +22,10 @@
   },
   "license": "MIT",
   "icon": "icon.png",
+  "icons": [
+    { "src": "icon.png", "size": "512x512" },
+    { "src": "icon-256.png", "size": "256x256" }
+  ],
   "keywords": [
     "business-central",
     "dynamics-365",
@@ -124,5 +131,10 @@
       "default": "auto"
     }
   },
+  "tools": [
+    { "name": "bc_actions_search", "description": "Search the Business Central actions (API pages and operations) available to the signed-in user. Read-only." },
+    { "name": "bc_actions_describe", "description": "Describe one Business Central action: its parameters, filters and the operations it allows. Read-only." },
+    { "name": "bc_actions_invoke", "description": "Invoke a Business Central action: read records, or create / update / delete / post when the MCP configuration allows writes. Treated as destructive." }
+  ],
   "tools_generated": true
 }
