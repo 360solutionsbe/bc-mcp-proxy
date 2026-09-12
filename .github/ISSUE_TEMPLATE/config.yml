@@ -1,10 +1,10 @@
 blank_issues_enabled: false
 contact_links:
   - name: Need help with Azure App Registration / BC MCP setup?
-    url: mailto:dev@360solutions.be
+    url: mailto:support@vangeldersolutions.be
     about: |
       The proxy install is the easy part — Azure App Registration with the
-      right permissions takes attention to detail. 360 Solutions offers an
+      right permissions takes attention to detail. Vangelder Solutions offers an
       end-to-end setup service. Contact us before opening an issue if
       you're stuck on configuration rather than code behaviour.
   - name: Microsoft Business Central MCP issues

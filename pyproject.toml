@@ -3,18 +3,18 @@ requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "360solutions-bc-mcp"
-version = "0.5.7"
+name = "vgs-bc-mcp"
+version = "0.6.0"
 description = "Resilient MCP stdio proxy for Microsoft Dynamics 365 Business Central — fork of microsoft/BCTech BcMCPProxyPython with reconnect, silent token refresh, and surfaced upstream errors."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-  { name = "Stephane Vangelder", email = "dev@360solutions.be" }
+  { name = "Stephane Vangelder", email = "support@vangeldersolutions.be" }
 ]
 maintainers = [
-  { name = "360 Solutions", email = "dev@360solutions.be" }
+  { name = "Vangelder Solutions", email = "support@vangeldersolutions.be" }
 ]
 keywords = [
   "business-central",
@@ -70,14 +70,14 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [project.urls]
-Homepage = "https://github.com/360solutionsbe/bc-mcp-proxy"
-Repository = "https://github.com/360solutionsbe/bc-mcp-proxy"
-Issues = "https://github.com/360solutionsbe/bc-mcp-proxy/issues"
+Homepage = "https://github.com/VangelderSolutions/bc-mcp-proxy"
+Repository = "https://github.com/VangelderSolutions/bc-mcp-proxy"
+Issues = "https://github.com/VangelderSolutions/bc-mcp-proxy/issues"
 Upstream = "https://github.com/microsoft/BCTech/tree/master/samples/BcMCPProxyPython"
 
 
 [project.scripts]
-360solutions-bc-mcp = "bc_mcp_proxy.__main__:main"
+vgs-bc-mcp = "bc_mcp_proxy.__main__:main"
 # Legacy alias kept for drop-in compatibility with the upstream Microsoft sample.
 bc-mcp-proxy = "bc_mcp_proxy.__main__:main"
 

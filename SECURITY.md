@@ -2,9 +2,9 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in `360Solutions-BC-MCP`, please report it privately so we can fix it before it is publicly disclosed.
+If you discover a security vulnerability in `VGS-BC-MCP`, please report it privately so we can fix it before it is publicly disclosed.
 
-**Email**: [dev@360solutions.be](mailto:dev@360solutions.be)
+**Email**: [support@vangeldersolutions.be](mailto:support@vangeldersolutions.be)
 
 Please include, where possible:
 
@@ -15,7 +15,7 @@ Please include, where possible:
 
 We aim to acknowledge new reports within **2 working days** and to ship a fix or coordinated disclosure plan within **30 days** of confirmation, depending on severity and scope.
 
-If you prefer GitHub's built-in private channel, you can also use [GitHub Security Advisories](https://github.com/360solutionsbe/bc-mcp-proxy/security/advisories/new) once the repository becomes public.
+If you prefer GitHub's built-in private channel, you can also use [GitHub Security Advisories](https://github.com/VangelderSolutions/bc-mcp-proxy/security/advisories/new) once the repository becomes public.
 
 ## Out of scope
 
