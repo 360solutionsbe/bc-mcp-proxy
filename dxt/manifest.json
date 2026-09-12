@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "vgs-bc-mcp",
   "display_name": "Business Central MCP Proxy",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "Bridge Claude Desktop to your Microsoft Dynamics 365 Business Central environment through Microsoft's official Business Central MCP server.",
   "long_description": "Resilient stdio MCP proxy that forwards tool calls from Claude Desktop to the Business Central MCP HTTP endpoint. Forked from microsoft/BCTech samples/BcMCPProxyPython with production fixes: interactive browser sign-in (device-code fallback), non-blocking tool discovery (no 30s first-call hang) that emits tools/list_changed, reconnect on transient httpx errors with exponential backoff, pre-emptive MSAL silent token refresh, surfacing of upstream errors that arrive masked as successful responses, retry with backoff on Business Central rate limits (429/503), Base64 encoding of non-ASCII company/configuration names (MCP SEP-2243), tool annotations (read-only vs destructive) so Claude can auto-approve reads, and pass-through of resources and prompts for BC v28 and v29 (2026 release wave 2). Interactive sign-in requires 'http://localhost' added to the Azure app registration under Authentication > Mobile and desktop applications. Maintained by Vangelder Solutions, an independent Microsoft partner; not affiliated with Microsoft or Anthropic. Tenant ID, client ID, environment, company and configuration name are configured at install time via the prompts below. Privacy policy: https://vangeldersolutions.github.io/bc-mcp-proxy/privacy/",
   "author": {
@@ -62,7 +62,8 @@
         "BC_CONFIGURATION_NAME": "${user_config.configuration_name}",
         "BC_LOG_LEVEL": "${user_config.log_level}",
         "BC_BASE_URL": "${user_config.base_url}",
-        "BC_AUTH_MODE": "${user_config.auth_mode}"
+        "BC_AUTH_MODE": "${user_config.auth_mode}",
+        "BC_HIDE_UNAUTHORIZED_TOOLS": "${user_config.hide_unauthorized_tools}"
       },
       "platform_overrides": {
         "win32": {
@@ -129,6 +130,13 @@
       "description": "How to sign in on first use. 'auto' (recommended): open the browser for an interactive sign-in, automatically falling back to the device-code flow if no browser is available. 'interactive': browser only. 'device_code': skip the browser entirely (use on headless/server hosts). Interactive sign-in requires the Azure app registration to have 'http://localhost' added under Authentication > Mobile and desktop applications.",
       "required": false,
       "default": "auto"
+    },
+    "hide_unauthorized_tools": {
+      "type": "boolean",
+      "title": "Hide tools the user may not use",
+      "description": "Static tool mode only. After connecting, the proxy reads one record from every List tool and hides the tools for pages Business Central refuses for the signed-in user (plus their Create/Update/Delete tools). Costs one call per API page per connect; Business Central still enforces every call.",
+      "required": false,
+      "default": false
     }
   },
   "tools": [

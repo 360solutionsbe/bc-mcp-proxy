@@ -174,6 +174,12 @@ class ProxyConfig:
   # returns large datasets as embedded resources / file references; v29 adds
   # more. BC_FORWARD_RESOURCES_PROMPTS=0 / --NoForwardResourcesPrompts disables.
   forward_resources_prompts: bool = True
+  # After each upstream connect, read one record from every static List tool
+  # and hide the tools (plus their write siblings) for pages Business Central
+  # refuses for this user. Opt-in: it costs one call per API page per connect
+  # and only helps static tool mode. BC enforces every call regardless.
+  # BC_HIDE_UNAUTHORIZED_TOOLS=1 / --HideUnauthorizedTools enables it.
+  hide_unauthorized_tools: bool = False
   # Persistent on-disk tools/list cache TTL.
   tools_disk_cache_ttl_seconds: float = 24 * 60 * 60
 

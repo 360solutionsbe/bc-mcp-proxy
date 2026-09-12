@@ -57,6 +57,15 @@ def build_parser() -> argparse.ArgumentParser:
       "--NoForwardResourcesPrompts", action="store_false",
       dest="forward_resources_prompts",
       help="Expose only tools/* to the client.")
+  parser.add_argument(
+      "--HideUnauthorizedTools", action="store_true",
+      dest="hide_unauthorized_tools", default=None,
+      help="Static tool mode: probe each List tool after connecting and hide "
+           "the tools for pages the signed-in user may not read (default: off).")
+  parser.add_argument(
+      "--NoHideUnauthorizedTools", action="store_false",
+      dest="hide_unauthorized_tools",
+      help="Show every tool Business Central lists, even those the user cannot use.")
   parser.add_argument("--Debug", action="store_true", dest="enable_debug")
   return parser
 
@@ -105,6 +114,9 @@ def parse_args(argv: list[str] | None = None) -> ProxyConfig:
       forward_resources_prompts=_select_bool(
           "forward_resources_prompts", args.forward_resources_prompts, env,
           defaults.forward_resources_prompts),
+      hide_unauthorized_tools=_select_bool(
+          "hide_unauthorized_tools", args.hide_unauthorized_tools, env,
+          defaults.hide_unauthorized_tools),
       enable_debug=args.enable_debug or _env_flag("BC_DEBUG"),
   )
 
@@ -184,6 +196,7 @@ def _config_from_env() -> dict[str, Optional[str]]:
       "log_level": os.getenv("BC_LOG_LEVEL"),
       "annotate_tools": os.getenv("BC_ANNOTATE_TOOLS"),
       "forward_resources_prompts": os.getenv("BC_FORWARD_RESOURCES_PROMPTS"),
+      "hide_unauthorized_tools": os.getenv("BC_HIDE_UNAUTHORIZED_TOOLS"),
   }
 
 
