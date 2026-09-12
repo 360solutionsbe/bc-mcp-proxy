@@ -39,6 +39,15 @@ import os
 from . import tools_cache
 from .auth import TokenProvider, create_token_provider
 from .config import ProxyConfig, is_v28_endpoint, validate_base_url
+from .permissions import (
+    STATIC_TOOL_RE,
+    PermissionRegistry,
+    annotate_permission_denied,
+    detect_permission_denied,
+    probe_static_permissions,
+    static_page_id,
+    static_verb,
+)
 
 # Re-exported for backward compatibility — older callers (and the existing
 # v28 endpoint test suite) import _is_v28_endpoint from this module.
@@ -448,9 +457,9 @@ _DYNAMIC_TITLES: dict[str, str] = {
     "bc_actions_describe": "Describe a Business Central action",
     "bc_actions_invoke": "Invoke a Business Central action",
 }
-# ListUpdate must come before List so the alternation cannot read
-# "ListUpdateX" as List + "UpdateX".
-_STATIC_TOOL_RE = re.compile(r"^(?P<verb>ListUpdate|List|Create|Delete)?(?P<rest>.+?)_PAG(?P<id>\d+)$")
+# The regex lives in permissions.py (shared with the tool-hiding filter);
+# kept under this name for scripts that import it from here.
+_STATIC_TOOL_RE = STATIC_TOOL_RE
 _STATIC_VERB_WORDS: dict[str, str] = {
     "List": "List", "Create": "Create", "ListUpdate": "Update", "Delete": "Delete",
 }
@@ -583,21 +592,38 @@ class _ToolsCache:
   pre-warm. Reads are lock-free; writes use a lock so concurrent refreshers
   can't interleave a partial state."""
 
-  def __init__(self, ttl_seconds: float, annotate: bool = False) -> None:
+  def __init__(
+      self,
+      ttl_seconds: float,
+      annotate: bool = False,
+      read_filter: Optional[Callable[[ListToolsResult], ListToolsResult]] = None,
+  ) -> None:
     self._ttl = ttl_seconds
     self._annotate = annotate
+    # Applied on every read, never on store: the stored (and on-disk) list
+    # stays complete because the disk cache is keyed per tenant/env/company/
+    # configuration, not per user, and verdicts belong to one user.
+    self._read_filter = read_filter
     self._result: Optional[ListToolsResult] = None
     self._fetched_at: float = 0.0
     self._lock = asyncio.Lock()
+
+  def _view(self, result: Optional[ListToolsResult]) -> Optional[ListToolsResult]:
+    if result is None or self._read_filter is None:
+      return result
+    return self._read_filter(result)
 
   def get_fresh(self, now: Optional[float] = None) -> Optional[ListToolsResult]:
     if self._result is None:
       return None
     if (now or time.monotonic()) - self._fetched_at > self._ttl:
       return None
-    return self._result
+    return self._view(self._result)
 
   def get_any(self) -> Optional[ListToolsResult]:
+    return self._view(self._result)
+
+  def get_unfiltered(self) -> Optional[ListToolsResult]:
     return self._result
 
   def store(self, result: ListToolsResult, now: Optional[float] = None) -> None:
@@ -702,6 +728,7 @@ class _UpstreamConnectionManager:
       logger: logging.Logger,
       tools_cache_obj: Optional[_ToolsCache] = None,
       notifier: Optional[_ClientNotifier] = None,
+      permission_registry: Optional[PermissionRegistry] = None,
       max_attempts: int = DEFAULT_RECONNECT_MAX_ATTEMPTS,
       base_backoff: float = DEFAULT_RECONNECT_BASE_BACKOFF,
       max_backoff: float = DEFAULT_RECONNECT_MAX_BACKOFF,
@@ -715,6 +742,7 @@ class _UpstreamConnectionManager:
     self.logger = logger
     self.tools_cache_obj = tools_cache_obj
     self.notifier = notifier
+    self.permission_registry = permission_registry
     self.max_attempts = max_attempts
     self.base_backoff = base_backoff
     self.max_backoff = max_backoff
@@ -855,6 +883,7 @@ class _UpstreamConnectionManager:
         # racing BC's cold-start. If pre-warm fails for any reason, fall
         # back to the existing behaviour — set the session active and
         # let the stdio handler hit upstream lazily.
+        tools_result: Optional[ListToolsResult] = None
         if self.tools_cache_obj is not None:
           try:
             tools_result = await remote_session.list_tools()
@@ -880,15 +909,54 @@ class _UpstreamConnectionManager:
         # Each successful init resets the retry budget; subsequent failures
         # start the backoff sequence over.
         self._attempt = 0
-        # Park here until the session dies on its own (the upstream raises
-        # out from under us) or _call_tool calls request_reconnect() because
-        # BC told us the session is gone. Either way, raising on wakeup lets
-        # the surrounding async-with's run their cleanup before run() retries.
-        self._reconnect_requested.clear()
-        await self._reconnect_requested.wait()
+        probe_task: Optional[asyncio.Task[None]] = None
+        if self.permission_registry is not None and tools_result is not None:
+          # Runs beside the client's own calls; verdicts from a previous
+          # session stay in force until this probe replaces them.
+          probe_task = asyncio.create_task(
+              self._probe_permissions(remote_session, tools_result),
+              name="bc-mcp-permission-probe")
+        try:
+          # Park here until the session dies on its own (the upstream raises
+          # out from under us) or _call_tool calls request_reconnect() because
+          # BC told us the session is gone. Either way, raising on wakeup lets
+          # the surrounding async-with's run their cleanup before run() retries.
+          self._reconnect_requested.clear()
+          await self._reconnect_requested.wait()
+        finally:
+          if probe_task is not None and not probe_task.done():
+            probe_task.cancel()
         reason = self._reconnect_reason or "reconnect requested"
         self._reconnect_reason = ""
         raise _UpstreamSessionExpiredError(reason)
+
+  async def _probe_permissions(
+      self, session: ClientSession, tools_result: ListToolsResult) -> None:
+    """Hide static tools for pages the user cannot read (opt-in)."""
+    registry = self.permission_registry
+    assert registry is not None
+    try:
+      outcome = await probe_static_permissions(
+          lambda name, args: session.call_tool(name, args),
+          tools_result, timeout=self.config.http_timeout_seconds, logger=self.logger)
+    except asyncio.CancelledError:
+      raise
+    except Exception as exc:  # noqa: BLE001 - hiding is best-effort
+      self.logger.warning("Permission probe failed (%s); no tools hidden", type(exc).__name__)
+      return
+    if outcome.aborted:
+      self.logger.warning(
+          "Permission probe interrupted by an upstream session loss; keeping "
+          "previous verdicts (%s)", registry.summary())
+      return
+    registry.replace(outcome.denied, outcome.allowed)
+    self.logger.info(
+        "Permission probe: %d page(s) readable, %d without Read permission, "
+        "%d undetermined -- %s",
+        len(outcome.allowed), len(outcome.denied), outcome.unknown, registry.summary())
+    if self.notifier is not None and self.tools_cache_obj is not None:
+      # The filtered view differs from what the client holds -> list_changed.
+      await self.notifier.maybe_notify(self.tools_cache_obj.get_any())
 
 
 async def run_proxy(config: ProxyConfig) -> None:
@@ -918,11 +986,18 @@ async def run_proxy(config: ProxyConfig) -> None:
   auth = _AsyncBearerAuth(token_provider)
 
   state = _UpstreamSessionHolder()
+  registry = PermissionRegistry() if config.hide_unauthorized_tools else None
   cache = _ToolsCache(
       ttl_seconds=config.tools_cache_ttl_seconds,
       annotate=config.annotate_tools,
+      read_filter=registry.filter if registry is not None else None,
   )
   notifier = _ClientNotifier(logger)
+  if registry is not None:
+    logger.info(
+        "BC_HIDE_UNAUTHORIZED_TOOLS is on: after each connect the proxy reads "
+        "one record from every static List tool and hides the pages Business "
+        "Central refuses (Business Central still enforces every call)")
 
   # Prepopulate the in-memory cache from disk (if a previous run cached
   # tools for this exact tenant/env/company/config). This is the only
@@ -1000,6 +1075,21 @@ async def run_proxy(config: ProxyConfig) -> None:
         f"call_tool[{name}]",
         lambda s: s.call_tool(name, arguments or {}),
     )
+    denial = detect_permission_denied(result)
+    if denial is not None:
+      # Before the masked-error check: a denial that also happens to contain
+      # a masked-error pattern deserves the explanation, not just the flag.
+      logger.warning(
+          "Business Central refused tool '%s' for lack of permission (%s); "
+          "see the note appended to the tool result",
+          name, denial.object_label or denial.message[:120],
+      )
+      if registry is not None and static_verb(name) == "List":
+        page_id = static_page_id(name)
+        if page_id is not None and registry.mark_denied(page_id, denial):
+          logger.info("Hiding static tools for PAG%s after a live denial", page_id)
+          await notifier.maybe_notify(cache.get_any())
+      return annotate_permission_denied(result, name, arguments, denial)
     masked = _detect_masked_error(result)
     if masked is not None:
       logger.warning(
@@ -1038,6 +1128,7 @@ async def run_proxy(config: ProxyConfig) -> None:
       logger=logger,
       tools_cache_obj=cache,
       notifier=notifier,
+      permission_registry=registry,
   )
 
   async with stdio_server() as (local_read, local_write):

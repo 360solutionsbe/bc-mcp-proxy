@@ -71,12 +71,10 @@ The HTTP status is 200 and the MCP result carries `isError: true`. The message i
 
 Two limits we hit while measuring: the automation API's `expandedPermissionSets` does not expose security filters (the filtered Customer line reports `readPermission: Yes` and nothing else), so filters can only be verified in the client or by reading through the API as that user; and the Permission Set page only commits a security filter when you leave the line, so verify the value after closing the card.
 
-## What the proxy adds (planned for 0.9.0)
+## What the proxy adds (0.9.0)
 
-Neither feature is released yet; the current 0.8.x forwards Business Central's denial unchanged. The behaviour below is what the fixture above is being used to build.
-
-- **A permission denial is named as such.** When Business Central refuses a call for lack of permission, the proxy appends a short note to the tool result so the AI client explains "you do not have Read on TableData Customer; ask your Business Central administrator" instead of retrying or blaming configuration. (On by default from 0.9.0.)
-- **Tools you cannot use are not shown** (optional, `BC_HIDE_UNAUTHORIZED_TOOLS=1`). In static tool mode the proxy reads one record from each listed page after connecting and hides every tool for pages that answer with a permission denial. Transient errors never hide anything. Business Central remains the enforcer: a hidden tool that is still called is still forwarded and still refused.
+- **A permission denial is named as such.** When Business Central refuses a call for lack of permission, the proxy appends a short note to the tool result so the AI client explains "you do not have Read on TableData Customer; ask your Business Central administrator" instead of retrying or blaming configuration. Always on.
+- **Tools you cannot use are not shown** (optional, `BC_HIDE_UNAUTHORIZED_TOOLS=1`). In static tool mode the proxy reads one record from each listed page after connecting and hides every tool for pages that answer with a permission denial, then pushes `tools/list_changed`; a denial seen on a live call hides its page at once. Transient errors never hide anything. The probe costs one call per API page per connect and shows up in `RT0054` telemetry under the user. Business Central remains the enforcer: a hidden tool that is still called is still forwarded and still refused.
 - **Nothing is cached across users.** The tool list cache is keyed by tenant, environment, company and configuration; a filtered list is never written to disk.
 
 ## What the proxy cannot do, and what a companion app could
