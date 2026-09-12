@@ -102,14 +102,14 @@ jobs:
     runs-on: ubuntu-latest
     # OIDC trusted publishing — no API token needed. Configure the trusted
     # publisher on PyPI: https://pypi.org/manage/account/publishing/
-    #   PyPI project name : 360solutions-bc-mcp
-    #   Owner             : 360solutionsbe
+    #   PyPI project name : vgs-bc-mcp
+    #   Owner             : VangelderSolutions
     #   Repository        : bc-mcp-proxy
     #   Workflow filename : release.yml
     #   Environment       : pypi
     environment:
       name: pypi
-      url: https://pypi.org/p/360solutions-bc-mcp
+      url: https://pypi.org/p/vgs-bc-mcp
     permissions:
       id-token: write
     steps:
