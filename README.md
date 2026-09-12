@@ -11,9 +11,9 @@
 >
 > Built and maintained by **[Vangelder Solutions](https://www.vangeldersolutions.be)**. Original: Copyright (c) Microsoft Corporation. Modifications: Copyright (c) 2026 Vangelder Solutions. Licensed under the MIT License.
 
-> ✅ **BC v28+ (May 2026): generally available.** Microsoft's Business Central MCP server is officially supported from version 28 onward, and this proxy targets it by default. The v26/v27 endpoint that preceded it was a preview and is still supported here for environments that haven't upgraded — expect occasional breaking changes from Microsoft on that path until everyone is on v28.
+> ✅ **BC v28 (2026 release wave 1) and v29 (2026 release wave 2, GA October 2026).** Microsoft's Business Central MCP server is generally available from version 28 onward on a single header-routed endpoint, and this proxy targets it by default. Version 29 keeps that contract and adds data-query and report-inbox tools, which the proxy forwards unchanged. The v26/v27 per-environment endpoint that preceded it was a preview; it is still supported here as an explicit legacy path for environments that haven't upgraded.
 >
-> The proxy itself is MIT-licensed open source, actively maintained, with a 95-test suite and Snyk-monitored dependencies. Suitable for development, evaluation, and pilot deployments. Production fitness is your organisation's call — see [Security](#security) for the threat model.
+> The proxy itself is MIT-licensed open source, actively maintained, with a 230+ test suite and Snyk-monitored dependencies. Suitable for development, evaluation, and pilot deployments. Production fitness is your organisation's call — see [Security](#security) for the threat model.
 
 ---
 
@@ -89,7 +89,7 @@ The proxy is the translator:
 
 | Item | Detail |
 |---|---|
-| **BC environment** | Version 26.0 or later. Sandbox or production. The MCP feature is enabled by default from v26. |
+| **BC environment** | Version 28.0 or later recommended (v29 supported); v26/v27 still work on the legacy endpoint. Sandbox or production. Read-only access to all API pages works out of the box; writes need an MCP Server Configuration with **Unblock Edit Tools** on. |
 | **Microsoft Entra (Azure AD) tenant** | With **administrator** rights — you'll create an App Registration and grant API permissions. |
 | **An AI client** | Claude Desktop (free), VS Code with MCP support, Cursor, or any other stdio-MCP capable tool. |
 | **Python 3.10+** on your machine | Claude Desktop launches the proxy with the system `python3`. The DXT bundle vendors all Python dependencies internally (Windows `cp310-win_amd64` wheels), so no separate `pip install` is required. |
@@ -197,13 +197,15 @@ BC_COMPANY=CRONUS USA
 BC_CONFIGURATION_NAME=Default MCP
 ```
 
-**For BC v26 or v27** add:
+**For BC v26 or v27 (legacy)** add:
 
 ```ini
 BC_BASE_URL=https://api.businesscentral.dynamics.com
 ```
 
-(BC v28 is now the default — Microsoft's documented endpoint for non-Microsoft MCP clients. The proxy auto-switches both the OAuth scope and the request headers to match.)
+(The v28+/v29 host is the default — Microsoft's documented endpoint for every MCP client. The proxy auto-switches both the OAuth scope and the request headers to match.)
+
+**Company or configuration names with accents** (`Société Générale`, `CRONUS Århus A/S`, `Ærø Handel`) need no special treatment: the proxy Base64-encodes non-ASCII header values the way Microsoft's MCP server requires (`=?base64?…?=`, MCP SEP-2243). Type the name exactly as it appears in Business Central.
 
 ### Step 5 — Wire it into your AI client
 
@@ -313,14 +315,21 @@ Our recommendation: start with **static mode** for the first test (fast feedback
 
 ## BC version compatibility
 
-Microsoft changed the MCP endpoint shape in BC v28, and now documents only the v28 host for non-Microsoft MCP clients. The proxy detects the host you point it at and adapts everything — URL shape, request headers, **and OAuth scope** — automatically:
+Microsoft changed the MCP endpoint shape in BC v28 and now documents a single host for every MCP client. Version 29 (2026 release wave 2) keeps the same endpoint, headers and OAuth scope and adds new tools (custom data queries, report-inbox automation). The proxy detects the host you point it at and adapts everything — URL shape, request headers, **and OAuth scope** — automatically:
 
 | BC version | `BC_BASE_URL`                                  | URL shape                             | Routing info                                  | OAuth scope                                                 |
 |------------|------------------------------------------------|---------------------------------------|-----------------------------------------------|--------------------------------------------------------------|
-| 28+ (default) | `https://mcp.businesscentral.dynamics.com`    | bare host, no path                    | `TenantId` + `EnvironmentName` headers (plus `Company`, `ConfigurationName`) | `https://mcp.businesscentral.dynamics.com/.default`         |
-| 26 / 27    | `https://api.businesscentral.dynamics.com`     | `/v2.0/{environment}/mcp` is appended | `Company`, `ConfigurationName` headers        | `https://api.businesscentral.dynamics.com/.default`         |
+| 28 / 29 (default) | `https://mcp.businesscentral.dynamics.com` | bare host, no path                    | `TenantId` + `EnvironmentName` headers (plus `Company`, `ConfigurationName`; non-ASCII values Base64-encoded per SEP-2243) | `https://mcp.businesscentral.dynamics.com/.default`         |
+| 26 / 27 (legacy) | `https://api.businesscentral.dynamics.com` | `/v2.0/{environment}/mcp` is appended | `Company`, `ConfigurationName` headers        | `https://api.businesscentral.dynamics.com/.default`         |
 
-Switching versions is a single-line change in `.env` or `--BaseUrl` — the scope and headers follow automatically. Set `BC_TOKEN_SCOPE` only if you need to override the auto-pick.
+Only the legacy `api.` host gets the legacy shape; any other `*.businesscentral.dynamics.com` host (a future regional subdomain, for instance) is treated as the modern header-routed endpoint. Switching versions is a single-line change in `.env` or `--BaseUrl` — the scope and headers follow automatically. Set `BC_TOKEN_SCOPE` only if you need to override the auto-pick.
+
+### What the proxy adds on top of BC's tools
+
+- **Tool annotations.** BC's tools arrive without `title`, `readOnlyHint` or `destructiveHint`. The proxy fills those in from Microsoft's documented naming — `bc_actions_search`/`bc_actions_describe` and `List…_PAG…` are read-only; `bc_actions_invoke`, `Create…`, `ListUpdate…`, `Delete…` and bound actions are destructive — so Claude can run reads without a per-call confirmation and always asks before a write. Anything BC does set is kept verbatim. Note that `bc_actions_invoke` (dynamic tool mode) executes reads *and* writes through one tool, so it is marked destructive. Disable with `BC_ANNOTATE_TOOLS=0` / `--NoAnnotateTools`.
+- **Resources and prompts.** From v28 the BC MCP server can hand back large results as embedded resources / file references, and v29 adds more. The proxy forwards `resources/*` and `prompts/*` alongside `tools/*` whenever BC advertises them at connect time (empty lists otherwise, never a blocking call). Disable with `BC_FORWARD_RESOURCES_PROMPTS=0` / `--NoForwardResourcesPrompts`.
+- **Rate limits.** Business Central online throttles per user (6000 requests per 5 minutes, 5 concurrent). A `429`, `503`, `408` or `504` is retried with exponential backoff, honouring `Retry-After` up to the 16 s cap, instead of ending the proxy process.
+- **Telemetry name.** Every request carries `X-Client-Application: vgs-bc-mcp/<version>`, which BC telemetry records as `clientName` on event `RT0054`, so proxy traffic is easy to isolate in Application Insights.
 
 ### Cold-start mitigation
 
@@ -345,8 +354,10 @@ The very first install on a freshly cold-started BC environment may still hit th
 | Configuration Name  | `--ConfigurationName`  | `BC_CONFIGURATION_NAME`  | unset                                                         |
 | Custom Auth Header  | `--CustomAuthHeader`   | `BC_CUSTOM_AUTH_HEADER`  | unset (skips interactive/device flow when provided)           |
 | Auth Mode           | `--AuthMode`           | `BC_AUTH_MODE`           | `auto` (`auto` \| `interactive` \| `device_code`)             |
-| Base URL            | `--BaseUrl`            | `BC_BASE_URL`            | `https://mcp.businesscentral.dynamics.com` (v28)              |
-| Token Scope         | `--TokenScope`         | `BC_TOKEN_SCOPE`         | auto-picked from base URL host (v28 → v28 scope, v27 → v27 scope) |
+| Base URL            | `--BaseUrl`            | `BC_BASE_URL`            | `https://mcp.businesscentral.dynamics.com` (v28 / v29)        |
+| Token Scope         | `--TokenScope`         | `BC_TOKEN_SCOPE`         | auto-picked from base URL host (legacy `api.` host → legacy scope, anything else → modern scope) |
+| Annotate Tools      | `--AnnotateTools` / `--NoAnnotateTools` | `BC_ANNOTATE_TOOLS` | on — adds `title`/`readOnlyHint`/`destructiveHint` where BC omits them |
+| Forward Resources/Prompts | `--ForwardResourcesPrompts` / `--NoForwardResourcesPrompts` | `BC_FORWARD_RESOURCES_PROMPTS` | on — forwards `resources/*` and `prompts/*` when BC advertises them |
 | HTTP Timeout (s)    | `--HttpTimeoutSeconds` | `BC_HTTP_TIMEOUT_SECONDS`| `120.0`                                                       |
 | SSE Timeout (s)     | `--SseTimeoutSeconds`  | `BC_SSE_TIMEOUT_SECONDS` | `300.0`                                                       |
 | Log Level           | `--LogLevel`           | `BC_LOG_LEVEL`           | `INFO`                                                        |

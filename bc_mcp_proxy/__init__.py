@@ -59,10 +59,10 @@ def _add_bundled_wheels_to_path() -> None:
 _add_bundled_wheels_to_path()
 
 
+from ._version import __version__  # noqa: E402, F401
 from .config import ProxyConfig  # noqa: E402, F401
 from .proxy import run_proxy  # noqa: E402, F401
 
 __all__ = ["ProxyConfig", "run_proxy", "__version__"]
-__version__ = "0.7.0"
 
 

@@ -13,7 +13,7 @@ body:
     id: proxy_version
     attributes:
       label: Proxy version
-      description: The `__version__` from `bc_mcp_proxy/__init__.py`, or the .dxt filename version.
+      description: The `__version__` from `bc_mcp_proxy/_version.py`, or the bundle filename version.
       placeholder: "0.5.0"
     validations:
       required: true
@@ -36,8 +36,9 @@ body:
     attributes:
       label: Business Central version
       options:
-        - "v28+ (mcp.businesscentral.dynamics.com)"
-        - "v26 / v27 (api.businesscentral.dynamics.com/v2.0/.../mcp)"
+        - "v29 (2026 release wave 2, mcp.businesscentral.dynamics.com)"
+        - "v28 (2026 release wave 1, mcp.businesscentral.dynamics.com)"
+        - "v26 / v27 legacy (api.businesscentral.dynamics.com/v2.0/.../mcp)"
         - "Don't know"
     validations:
       required: true

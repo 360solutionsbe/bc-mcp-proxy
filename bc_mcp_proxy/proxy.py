@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import email.utils
 import logging
+import re
 import time
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
 import httpx
@@ -14,11 +18,20 @@ from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
 from mcp.types import (
     INTERNAL_ERROR,
+    INVALID_PARAMS,
     CallToolResult,
     ErrorData,
+    GetPromptResult,
     Implementation,
+    ListPromptsResult,
+    ListResourcesResult,
     ListToolsResult,
+    ReadResourceRequest,
+    ServerCapabilities,
+    ServerResult,
     TextContent,
+    Tool,
+    ToolAnnotations,
 )
 
 import os
@@ -43,6 +56,13 @@ _RECOVERABLE_HTTPX_ERRORS: tuple[type[BaseException], ...] = (
     httpx.NetworkError,
     httpx.RemoteProtocolError,
 )
+
+# HTTP statuses Business Central online documents as transient: 429 (rate
+# limit -- per user 6000 requests per 5-minute window, 5 concurrent), 503
+# (queued request timed out), 408/504 (request ran past the operation
+# limit). Microsoft's guidance is to retry with a cool-off period; a
+# Retry-After header, when present, is honoured by the reconnect loop.
+_RETRYABLE_HTTP_STATUSES: frozenset[int] = frozenset({408, 429, 503, 504})
 
 DEFAULT_RECONNECT_MAX_ATTEMPTS = 5
 DEFAULT_RECONNECT_BASE_BACKOFF = 1.0
@@ -129,7 +149,86 @@ def _is_recoverable_upstream_error(exc: BaseException) -> bool:
   if not leaves:
     return False
   recoverable_leaf_types = _RECOVERABLE_HTTPX_ERRORS + (_UpstreamSessionExpiredError,)
-  return all(isinstance(leaf, recoverable_leaf_types) for leaf in leaves)
+  return all(
+      isinstance(leaf, recoverable_leaf_types)
+      or _retryable_status_in_chain(leaf) is not None
+      for leaf in leaves
+  )
+
+
+def _status_if_retryable(exc: BaseException) -> Optional[int]:
+  if isinstance(exc, httpx.HTTPStatusError):
+    status = getattr(exc.response, "status_code", None)
+    if status in _RETRYABLE_HTTP_STATUSES:
+      return status
+  return None
+
+
+def _retryable_status_in_chain(exc: BaseException) -> Optional[int]:
+  """Return the transient HTTP status (429/503/408/504) carried by `exc` or
+  by anything in its __cause__/__context__ chain, else None.
+
+  The MCP client lib sometimes wraps the transport's HTTPStatusError in an
+  McpError (notably during initialize()), so the status has to be looked for
+  along the chain, not only on the leaf itself."""
+  seen: set[int] = set()
+  current: Optional[BaseException] = exc
+  while current is not None and id(current) not in seen:
+    seen.add(id(current))
+    status = _status_if_retryable(current)
+    if status is not None:
+      return status
+    current = current.__cause__ or current.__context__
+  return None
+
+
+def _retryable_upstream_status(exc: BaseException) -> Optional[int]:
+  """First transient HTTP status found across every leaf of `exc`."""
+  for leaf in _iter_leaf_exceptions(exc):
+    status = _retryable_status_in_chain(leaf)
+    if status is not None:
+      return status
+  return None
+
+
+def _retry_after_seconds(
+    exc: BaseException,
+    now: Optional[datetime] = None,
+) -> Optional[float]:
+  """Parse the Retry-After header from the first transient HTTP error in `exc`.
+
+  Accepts delta-seconds ("30") or an HTTP-date. Returns None when absent,
+  unparseable or already in the past, so callers fall back to their own
+  backoff."""
+  for leaf in _iter_leaf_exceptions(exc):
+    current: Optional[BaseException] = leaf
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+      seen.add(id(current))
+      if _status_if_retryable(current) is not None:
+        header = current.response.headers.get("Retry-After")  # type: ignore[union-attr]
+        return _parse_retry_after(header, now)
+      current = current.__cause__ or current.__context__
+  return None
+
+
+def _parse_retry_after(header: Optional[str], now: Optional[datetime] = None) -> Optional[float]:
+  if not header:
+    return None
+  value = header.strip()
+  if value.isdigit():
+    return float(value)
+  try:
+    when = email.utils.parsedate_to_datetime(value)
+  except (TypeError, ValueError, IndexError):
+    return None
+  if when is None:
+    return None
+  if when.tzinfo is None:
+    when = when.replace(tzinfo=timezone.utc)
+  reference = now or datetime.now(timezone.utc)
+  delta = (when - reference).total_seconds()
+  return delta if delta > 0 else None
 
 
 def _is_session_terminated_error(exc: BaseException) -> bool:
@@ -154,7 +253,8 @@ def _exception_hints_at_client_cancel(exc: BaseException) -> bool:
   for leaf in _iter_leaf_exceptions(exc):
     if isinstance(leaf, httpx.HTTPStatusError):
       status = getattr(leaf.response, "status_code", None)
-      if status is not None and 400 <= status < 500:
+      if (status is not None and 400 <= status < 500
+          and status not in _RETRYABLE_HTTP_STATUSES):
         return True
     if isinstance(leaf, httpx.RemoteProtocolError):
       return True
@@ -162,19 +262,20 @@ def _exception_hints_at_client_cancel(exc: BaseException) -> bool:
 
 
 def _permanent_upstream_status(exc: BaseException) -> Optional[int]:
-  """If `exc` carries an httpx 4xx (other than 429), return that status.
+  """If `exc` carries an httpx 4xx (other than 408/429), return that status.
 
   A 4xx from Business Central means the request/config/permissions are
   wrong — not a transient blip. Retrying or letting the process crash so
   Claude Desktop respawns it just produces a tight crash-loop into the
-  same failure. 429 is excluded: rate limiting is transient and stays on
-  the normal recoverable path. The transport wraps errors in an anyio
-  ExceptionGroup, so walk every leaf.
+  same failure. 429 (rate limit) and 408 (request timeout) are excluded:
+  BC documents both as transient and they stay on the recoverable path.
+  The transport wraps errors in an anyio ExceptionGroup, so walk every leaf.
   """
   for leaf in _iter_leaf_exceptions(exc):
     if isinstance(leaf, httpx.HTTPStatusError):
       status = getattr(leaf.response, "status_code", None)
-      if isinstance(status, int) and 400 <= status < 500 and status != 429:
+      if (isinstance(status, int) and 400 <= status < 500
+          and status not in _RETRYABLE_HTTP_STATUSES):
         return status
   return None
 
@@ -332,6 +433,108 @@ def _tools_signature(result: Optional[ListToolsResult]) -> int:
   return hash(names)
 
 
+# BC's MCP server names its tools two ways (Microsoft Learn, "Configure
+# Business Central MCP Server"): in dynamic tool mode three system tools,
+# and in static mode one tool per allowed operation on an API page:
+#   List<object>_PAG<id>        read
+#   Create<object>_PAG<id>      write
+#   ListUpdate<object>_PAG<id>  write
+#   Delete<object>_PAG<id>      write
+#   <boundAction>_PAG<id>       write (posting, status changes, codeunits)
+_DYNAMIC_READ_TOOLS: frozenset[str] = frozenset({"bc_actions_search", "bc_actions_describe"})
+_DYNAMIC_WRITE_TOOLS: frozenset[str] = frozenset({"bc_actions_invoke"})
+_DYNAMIC_TITLES: dict[str, str] = {
+    "bc_actions_search": "Search Business Central actions",
+    "bc_actions_describe": "Describe a Business Central action",
+    "bc_actions_invoke": "Invoke a Business Central action",
+}
+# ListUpdate must come before List so the alternation cannot read
+# "ListUpdateX" as List + "UpdateX".
+_STATIC_TOOL_RE = re.compile(r"^(?P<verb>ListUpdate|List|Create|Delete)?(?P<rest>.+?)_PAG(?P<id>\d+)$")
+_STATIC_VERB_WORDS: dict[str, str] = {
+    "List": "List", "Create": "Create", "ListUpdate": "Update", "Delete": "Delete",
+}
+# Anthropic's directory requires tool names of at most 64 characters.
+_MAX_TOOL_NAME_LENGTH = 64
+
+
+def _classify_tool(name: str) -> Optional[tuple[str, str]]:
+  """Return ("read" | "write", derived title) for a BC-shaped tool name.
+
+  Unknown names return None and are forwarded untouched; guessing wrong on
+  a tool we do not recognise would be worse than leaving it unannotated."""
+  if name in _DYNAMIC_READ_TOOLS:
+    return "read", _DYNAMIC_TITLES[name]
+  if name in _DYNAMIC_WRITE_TOOLS:
+    return "write", _DYNAMIC_TITLES[name]
+  match = _STATIC_TOOL_RE.match(name)
+  if match is None:
+    return None
+  verb = match.group("verb")
+  subject = match.group("rest").strip(" -_")
+  if verb is None:
+    # A bound action: BC exposes it only when "Allow Bound Actions" is on,
+    # and bound actions post documents / run business logic.
+    return "write", subject
+  return ("read" if verb == "List" else "write"), f"{_STATIC_VERB_WORDS[verb]} {subject}"
+
+
+def _annotate_tool(tool: Tool) -> Tool:
+  classified = _classify_tool(tool.name)
+  if classified is None:
+    return tool
+  kind, title = classified
+  read_only = kind == "read"
+  existing = tool.annotations
+  updates: dict[str, Any] = {}
+  if existing is None or existing.readOnlyHint is None:
+    updates["readOnlyHint"] = read_only
+  if existing is None or existing.destructiveHint is None:
+    updates["destructiveHint"] = not read_only
+  if existing is None or existing.title is None:
+    updates["title"] = tool.title or title
+  if existing is None:
+    annotations = ToolAnnotations(**updates)
+  elif updates:
+    annotations = existing.model_copy(update=updates)
+  else:
+    annotations = existing
+  tool_updates: dict[str, Any] = {}
+  if annotations is not existing:
+    tool_updates["annotations"] = annotations
+  if tool.title is None:
+    tool_updates["title"] = annotations.title or title
+  return tool.model_copy(update=tool_updates) if tool_updates else tool
+
+
+def _annotate_tools(result: ListToolsResult) -> ListToolsResult:
+  """Fill in `title`, `readOnlyHint` and `destructiveHint` where BC left them
+  out, based on the tool naming documented for the BC MCP server.
+
+  Only missing fields are filled; anything BC sends is kept verbatim. Claude
+  uses the hints for auto-permissions (read-only tools run without a per-call
+  confirmation, destructive ones always prompt) and Anthropic's directory
+  review requires them on every tool. Idempotent, so the same result can pass
+  through the in-memory and on-disk cache tiers any number of times.
+
+  Caveat: `bc_actions_invoke` (dynamic tool mode) executes reads and writes
+  through one tool; marking it destructive is the conservative choice."""
+  tools = list(getattr(result, "tools", None) or [])
+  if not tools:
+    return result
+  annotated = [_annotate_tool(t) for t in tools]
+  long_names = [t.name for t in tools if len(t.name) > _MAX_TOOL_NAME_LENGTH]
+  if long_names:
+    logging.getLogger("bc_mcp_proxy").warning(
+        "%d tool name(s) exceed %d characters (e.g. %r); Anthropic's directory "
+        "rejects such tools -- shorten the API page name in Business Central",
+        len(long_names), _MAX_TOOL_NAME_LENGTH, long_names[0],
+    )
+  if all(a is t for a, t in zip(annotated, tools)):
+    return result
+  return result.model_copy(update={"tools": annotated})
+
+
 class _ClientNotifier:
   """Bridges the background upstream pre-warm to the connected MCP client.
 
@@ -380,8 +583,9 @@ class _ToolsCache:
   pre-warm. Reads are lock-free; writes use a lock so concurrent refreshers
   can't interleave a partial state."""
 
-  def __init__(self, ttl_seconds: float) -> None:
+  def __init__(self, ttl_seconds: float, annotate: bool = False) -> None:
     self._ttl = ttl_seconds
+    self._annotate = annotate
     self._result: Optional[ListToolsResult] = None
     self._fetched_at: float = 0.0
     self._lock = asyncio.Lock()
@@ -397,7 +601,9 @@ class _ToolsCache:
     return self._result
 
   def store(self, result: ListToolsResult, now: Optional[float] = None) -> None:
-    self._result = result
+    # Single choke point for every tier (disk -> memory -> pre-warm ->
+    # background refresh), so the client always sees the same annotated set.
+    self._result = _annotate_tools(result) if self._annotate else result
     self._fetched_at = now if now is not None else time.monotonic()
 
   @property
@@ -416,6 +622,9 @@ class _UpstreamSessionHolder:
   def __init__(self) -> None:
     self._session: Optional[ClientSession] = None
     self._get_session_id: Optional[Callable[[], Optional[str]]] = None
+    # What the upstream declared at initialize(); drives whether resources/*
+    # and prompts/* are forwarded or answered locally with an empty list.
+    self._capabilities: Optional[ServerCapabilities] = None
     self._ready = asyncio.Event()
     # Set once the upstream has permanently failed (a 4xx that won't fix
     # itself this process). Sticky: never cleared, so waiters surface it
@@ -435,15 +644,28 @@ class _UpstreamSessionHolder:
       self,
       session: ClientSession,
       get_session_id: Callable[[], Optional[str]],
+      capabilities: Optional[ServerCapabilities] = None,
   ) -> None:
     self._session = session
     self._get_session_id = get_session_id
+    self._capabilities = capabilities
     self._ready.set()
 
   def clear_session(self) -> None:
     self._session = None
     self._get_session_id = None
+    self._capabilities = None
     self._ready.clear()
+
+  @property
+  def upstream_capabilities(self) -> Optional[ServerCapabilities]:
+    return self._capabilities
+
+  def upstream_supports(self, capability: str) -> bool:
+    """True if the live upstream session advertised `capability`
+    ("resources", "prompts", "tools", ...)."""
+    caps = self._capabilities
+    return caps is not None and getattr(caps, capability, None) is not None
 
   async def wait_active(self) -> ClientSession:
     while True:
@@ -555,10 +777,22 @@ class _UpstreamConnectionManager:
         backoff = _backoff_for_attempt(
             self._attempt - 1, self.base_backoff, self.max_backoff,
         )
+        transient_status = _retryable_upstream_status(exc)
+        retry_after = _retry_after_seconds(exc)
+        if retry_after is not None:
+          # Never shorter than our own step, never longer than the cap: a
+          # Retry-After of 60s on a stdio proxy would look like a hang.
+          backoff = min(max(retry_after, backoff), self.max_backoff)
         hint = (
             " -- possible client-side cancellation"
             if _exception_hints_at_client_cancel(exc) else ""
         )
+        if transient_status is not None:
+          hint += (
+              f" -- Business Central answered HTTP {transient_status}"
+              + (" (rate limited)" if transient_status == 429 else "")
+              + (f", Retry-After={retry_after:g}s" if retry_after is not None else "")
+          )
         self.logger.warning(
             "Upstream connection error (%s); session=%s%s; reconnecting in %.1fs (attempt %d/%d)",
             type(exc).__name__,
@@ -590,6 +824,10 @@ class _UpstreamConnectionManager:
         try:
           init_result = await remote_session.initialize()
         except McpError as exc:
+          if _retryable_status_in_chain(exc) is not None:
+            # A rate limit / transient 5xx during the handshake is not a
+            # rejection; let run() see it as recoverable and back off.
+            raise
           # A failure during the initial handshake means BC refused the
           # connection itself — most often a 404 (wrong Environment / MCP
           # configuration / no access) which the client lib reports as
@@ -599,9 +837,17 @@ class _UpstreamConnectionManager:
           # terminate is handled by _invoke_with_session_recovery and
           # never reaches here.
           raise _UpstreamConnectRejected(str(exc)) from exc
-        self.logger.debug(
-            "Connected to remote MCP server (protocol %s)",
+        capabilities = getattr(init_result, "capabilities", None)
+        server_info = getattr(init_result, "serverInfo", None)
+        self.logger.info(
+            "Connected to Business Central MCP server %s %s (protocol %s; "
+            "tools=%s resources=%s prompts=%s)",
+            getattr(server_info, "name", "?"),
+            getattr(server_info, "version", "?"),
             init_result.protocolVersion,
+            getattr(capabilities, "tools", None) is not None,
+            getattr(capabilities, "resources", None) is not None,
+            getattr(capabilities, "prompts", None) is not None,
         )
 
         # Pre-warm tools/list before exposing the session so the stdio
@@ -630,7 +876,7 @@ class _UpstreamConnectionManager:
                 type(exc).__name__,
             )
 
-        self.state.set_session(remote_session, get_session_id)
+        self.state.set_session(remote_session, get_session_id, capabilities)
         # Each successful init resets the retry budget; subsequent failures
         # start the backoff sequence over.
         self._attempt = 0
@@ -672,7 +918,10 @@ async def run_proxy(config: ProxyConfig) -> None:
   auth = _AsyncBearerAuth(token_provider)
 
   state = _UpstreamSessionHolder()
-  cache = _ToolsCache(ttl_seconds=config.tools_cache_ttl_seconds)
+  cache = _ToolsCache(
+      ttl_seconds=config.tools_cache_ttl_seconds,
+      annotate=config.annotate_tools,
+  )
   notifier = _ClientNotifier(logger)
 
   # Prepopulate the in-memory cache from disk (if a previous run cached
@@ -769,8 +1018,14 @@ async def run_proxy(config: ProxyConfig) -> None:
       )
     return annotated
 
+  if config.forward_resources_prompts:
+    _register_resource_and_prompt_handlers(
+        server, state, lambda: manager, logger)
+
   # Advertise tools.listChanged so the client honours the
   # notifications/tools/list_changed we push after a cold-start auth.
+  # resources/prompts capabilities are advertised automatically when their
+  # handlers are registered above.
   init_options = server.create_initialization_options(
       NotificationOptions(tools_changed=True))
 
@@ -800,6 +1055,90 @@ async def run_proxy(config: ProxyConfig) -> None:
     await asyncio.gather(*pending, return_exceptions=True)
     for task in done:
       task.result()  # re-raise upstream/server failures
+
+
+def _register_resource_and_prompt_handlers(
+    server: Server,
+    state: _UpstreamSessionHolder,
+    get_manager: Callable[[], _UpstreamConnectionManager],
+    logger: logging.Logger,
+) -> None:
+  """Forward resources/* and prompts/* to Business Central.
+
+  BC v28+ can return large datasets as embedded resources / file references
+  and v29 adds data-query and report tools; a tools-only proxy would leave
+  the client unable to follow those references. List calls never block on
+  a cold upstream: while the session is not up (or BC did not advertise the
+  capability) they answer with an empty list, mirroring tools/list. Reads
+  and prompt fetches need the live session and go through the same
+  session-terminated recovery as tool calls.
+  """
+
+  def _raise_if_fatal() -> None:
+    fatal = state.fatal
+    if fatal is not None:
+      raise fatal
+
+  def _unsupported(capability: str) -> McpError:
+    return McpError(ErrorData(
+        code=INVALID_PARAMS,
+        message=(f"Business Central did not advertise {capability} for this "
+                 "session, so the request cannot be forwarded."),
+    ))
+
+  @server.list_resources()
+  async def _list_resources() -> Any:
+    _raise_if_fatal()
+    if not state.upstream_supports("resources"):
+      return ListResourcesResult(resources=[])
+    return await _invoke_with_session_recovery(
+        state, get_manager(), logger, "list_resources",
+        lambda s: s.list_resources())
+
+  @server.list_resource_templates()
+  async def _list_resource_templates() -> Any:
+    _raise_if_fatal()
+    if not state.upstream_supports("resources"):
+      return []
+    result = await _invoke_with_session_recovery(
+        state, get_manager(), logger, "list_resource_templates",
+        lambda s: s.list_resource_templates())
+    return list(getattr(result, "resourceTemplates", None) or [])
+
+  async def _read_resource(req: ReadResourceRequest) -> ServerResult:
+    # Registered directly rather than through @server.read_resource(): the
+    # SDK decorator (1.27) re-wraps whatever the handler returns into new
+    # TextResourceContents/BlobResourceContents keyed on the *request* URI,
+    # which drops per-content URIs and mangles multi-part results. BC's
+    # ReadResourceResult must reach the client verbatim.
+    _raise_if_fatal()
+    if not state.upstream_supports("resources"):
+      raise _unsupported("resources")
+    uri = req.params.uri
+    result = await _invoke_with_session_recovery(
+        state, get_manager(), logger, f"read_resource[{uri}]",
+        lambda s: s.read_resource(uri))
+    return ServerResult(result)
+
+  server.request_handlers[ReadResourceRequest] = _read_resource
+
+  @server.list_prompts()
+  async def _list_prompts() -> Any:
+    _raise_if_fatal()
+    if not state.upstream_supports("prompts"):
+      return ListPromptsResult(prompts=[])
+    return await _invoke_with_session_recovery(
+        state, get_manager(), logger, "list_prompts",
+        lambda s: s.list_prompts())
+
+  @server.get_prompt()
+  async def _get_prompt(name: str, arguments: Optional[dict[str, str]]) -> GetPromptResult:
+    _raise_if_fatal()
+    if not state.upstream_supports("prompts"):
+      raise _unsupported("prompts")
+    return await _invoke_with_session_recovery(
+        state, get_manager(), logger, f"get_prompt[{name}]",
+        lambda s: s.get_prompt(name, arguments))
 
 
 async def _invoke_with_session_recovery(
@@ -851,22 +1190,46 @@ async def _refresh_tools_cache(
     logger.warning("Background tools/list refresh failed: %s", type(exc).__name__)
 
 
+def _encode_header_value(value: str) -> str:
+  """Prepare a Company / ConfigurationName value for the wire.
+
+  BC's MCP server follows MCP SEP-2243: header values that are not pure
+  ASCII must be sent as `=?base64?<base64 of the UTF-8 bytes>?=`
+  (Microsoft Learn's example: `Cronus Århus A/S` becomes
+  `=?base64?Q3JvbnVzIMOFcmh1cyBBL1M=?=`). ASCII values go verbatim.
+  Surrounding whitespace is stripped first, so a pasted trailing space is
+  neither sent nor base64-encoded into the value.
+  """
+  stripped = value.strip()
+  if stripped.isascii():
+    return stripped
+  encoded = base64.b64encode(stripped.encode("utf-8")).decode("ascii")
+  return f"=?base64?{encoded}?="
+
+
+def _client_application(config: ProxyConfig) -> str:
+  """Value for X-Client-Application; BC telemetry stores it as clientName."""
+  version = (config.server_version or "").strip()
+  return f"{config.server_name}/{version}" if version else config.server_name
+
+
 def _build_transport_headers(config: ProxyConfig) -> dict[str, str]:
   headers: dict[str, str] = {
-      "X-Client-Application": config.server_name,
+      "X-Client-Application": _client_application(config),
   }
   # Use the configured values literally (stripped), consistent with
   # tenant_id/environment below. The upstream Microsoft sample ran these
   # through urllib.parse.unquote, which silently corrupts any name
   # containing '%' or '+' (e.g. "R&D %1" or "A+B Ltd") — our config comes
   # from .dxt fields / CLI / env entered verbatim, never URL-encoded, so
-  # decoding was wrong for this input model.
+  # decoding was wrong for this input model. Non-ASCII names are base64
+  # encoded per SEP-2243 (see _encode_header_value).
   if config.company:
-    headers["Company"] = config.company.strip()
+    headers["Company"] = _encode_header_value(config.company)
   if config.configuration_name:
-    headers["ConfigurationName"] = config.configuration_name.strip()
+    headers["ConfigurationName"] = _encode_header_value(config.configuration_name)
   if is_v28_endpoint(config.base_url):
-    # The v28 host requires routing info in headers because the URL no
+    # The modern host requires routing info in headers because the URL no
     # longer carries the environment in its path. .strip() here is
     # defense-in-depth — __main__._clean already strips at the CLI/env
     # boundary, but callers that build ProxyConfig directly (tests,
@@ -891,7 +1254,7 @@ def _build_endpoint_url(config: ProxyConfig, base_url_override: Optional[str] = 
     base = validate_base_url(config.base_url, allow_non_standard=True)
   base = base.rstrip("/")
   if is_v28_endpoint(base):
-    # v28 host expects the bare URL — no /v2.0/{env}/mcp path.
+    # Modern (v28+) host expects the bare URL — no /v2.0/{env}/mcp path.
     return base
   return f"{base}/v2.0/{config.environment}/mcp"
 
