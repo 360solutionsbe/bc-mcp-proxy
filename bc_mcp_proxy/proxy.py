@@ -18,6 +18,7 @@ from mcp.types import (
     ErrorData,
     Implementation,
     ListToolsResult,
+    TextContent,
 )
 
 import os
@@ -81,6 +82,13 @@ _MASKED_ERROR_PATTERNS: tuple[str, ...] = (
     "BadRequest_NotFound",
     "Bad Request",
 )
+
+# BC's error code when a tool call cannot resolve a company. Its message
+# ("specify a default company in the service configuration file") is written
+# for on-premises NST and is actively misleading for a SaaS environment --
+# there is no configuration file to edit, and the Company header is being
+# sent. See _annotate_company_not_found.
+_COMPANY_NOT_FOUND_CODE = "Internal_CompanyNotFound"
 
 
 class _AsyncBearerAuth(httpx.Auth):
@@ -243,6 +251,62 @@ def _detect_masked_error(result: CallToolResult) -> Optional[str]:
 def _flag_as_error(result: CallToolResult) -> CallToolResult:
   """Return a CallToolResult with isError=True, preserving content."""
   return result.model_copy(update={"isError": True})
+
+
+def _result_text(result: CallToolResult) -> str:
+  """Concatenate the text parts of a tool result (non-text parts ignored)."""
+  parts = []
+  for item in getattr(result, "content", None) or []:
+    text = getattr(item, "text", None)
+    if isinstance(text, str) and text:
+      parts.append(text)
+  return "\n".join(parts)
+
+
+def _annotate_company_not_found(
+    result: CallToolResult,
+    config: ProxyConfig,
+) -> CallToolResult:
+  """Append an accurate explanation when BC answers Internal_CompanyNotFound.
+
+  BC's own message says to "specify a default company in the service
+  configuration file", which is on-premises advice: an online environment has
+  no such file. The instinct it produces is to go and change the configured
+  company name, and that has cost real debugging time against a configuration
+  that was correct all along.
+
+  What was measured (17 Aug 2026, both a v28 and a v26/v27 endpoint, headers
+  logged on the wire): the Company header rides on the httpx client's default
+  headers, so it is present on *every* request including the tool-call POST,
+  not only the connect POST; a company that does not exist is rejected at
+  connect with a 404 instead, so reaching this error means the name resolved
+  once already; and the failure appears and clears on its own, hitting every
+  company and every environment on the tenant at the same time. So it is not
+  the configured name. Say that here rather than let the next reader re-derive
+  it from a message written for a different product shape.
+  """
+  text = _result_text(result)
+  if _COMPANY_NOT_FOUND_CODE.lower() not in text.lower():
+    return result
+  note = (
+      f"\n\n[bc-mcp-proxy] Business Central could not resolve a company for "
+      f"this call. Effective config: environment={config.environment!r} "
+      f"company={config.company!r} "
+      f"configuration_name={config.configuration_name or '<not set>'!r}.\n"
+      "Before changing any of the above, note what this error does NOT mean. "
+      "The Company header is sent on every request, including this one. A "
+      "company name that does not exist is rejected earlier, at connect, with "
+      "a 404 -- so the name resolved at least once for this session. And BC's "
+      "advice to edit a 'service configuration file' applies to on-premises "
+      "installations only; there is no such file for an online environment.\n"
+      "This has been observed as a transient server-side fault that takes out "
+      "every company and every environment on a tenant at once, and clears on "
+      "its own. Reading the same data in the web client meanwhile works. If it "
+      "persists, that is worth reporting to Microsoft rather than reconfiguring."
+  )
+  content = list(getattr(result, "content", None) or [])
+  content.append(TextContent(type="text", text=note))
+  return result.model_copy(update={"content": content, "isError": True})
 
 
 def _backoff_for_attempt(
@@ -694,7 +758,16 @@ async def run_proxy(config: ProxyConfig) -> None:
           name, masked,
       )
       return _flag_as_error(result)
-    return result
+    annotated = _annotate_company_not_found(result, config)
+    if annotated is not result:
+      logger.warning(
+          "Upstream could not resolve a company for tool '%s' "
+          "(environment=%s company=%s configuration=%s); the Company header "
+          "was sent -- see the appended note in the tool result",
+          name, config.environment, config.company,
+          config.configuration_name or "<not set>",
+      )
+    return annotated
 
   # Advertise tools.listChanged so the client honours the
   # notifications/tools/list_changed we push after a cold-start auth.
