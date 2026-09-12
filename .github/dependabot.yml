@@ -27,6 +27,13 @@ updates:
       # through the mcp-stack group below.
       - dependency-name: "mcp"
         update-types: ["version-update:semver-major"]
+      # rpds-py 2026.x raises requires-python to >=3.11, but this project
+      # supports 3.10 and the .dxt bundle vendors a cp310 wheel set. Dependabot
+      # proposed 0.30.0 -> 2026.6.3 in #55 and the bundle-resolution job failed
+      # on two platforms, which is the guard working — but the PR would return
+      # with every 2026.x release. Revisit if requires-python is ever raised.
+      - dependency-name: "rpds-py"
+        update-types: ["version-update:semver-major"]
     groups:
       mcp-stack:
         patterns:
