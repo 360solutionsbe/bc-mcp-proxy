@@ -66,11 +66,13 @@ cp dxt/manifest.json    "$build_dir/manifest.json"
 cp dxt/requirements.txt "$build_dir/server/requirements.txt"
 cp -R bc_mcp_proxy      "$build_dir/server/bc_mcp_proxy"
 cp LICENSE              "$build_dir/LICENSE"
-if [[ -f dxt/icon.png ]]; then
-  cp dxt/icon.png "$build_dir/icon.png"
-else
-  echo "  (no dxt/icon.png — bundle will ship without an icon)"
-fi
+for icon in icon.png icon-256.png; do
+  if [[ -f "dxt/$icon" ]]; then
+    cp "dxt/$icon" "$build_dir/$icon"
+  else
+    echo "  (no dxt/$icon — bundle will ship without it)"
+  fi
+done
 
 for abi in 310 311 312 313 314; do
   py_ver="3.${abi:1}"

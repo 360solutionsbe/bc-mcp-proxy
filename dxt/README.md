@@ -12,7 +12,7 @@ Claude Desktop and can later be submitted to Anthropic's Extensions Directory.
 | `requirements.txt`| Python dependencies that Claude Desktop installs into the extension's runtime.                |
 | `build.ps1`       | PowerShell build script (Windows / cross-platform via `pwsh`).                                |
 | `build.sh`        | POSIX shell build script (macOS / Linux).                                                     |
-| `icon.png`        | *(Optional)* 256×256 PNG icon. Add one before publishing.                                     |
+| `icon.png`        | 512×512 PNG extension icon; `icon-256.png` is the 256×256 variant. Both are rendered by `icon_source/render_icon.py` from the Vangelder Solutions V5 brand (Archivo outlines, navy, green rule) — never hand-edit the PNGs. |
 
 ## Building
 
@@ -46,7 +46,7 @@ The first BC tool call triggers the standard MSAL device-code login (the bundled
 
 To submit to the Anthropic Extensions Directory:
 
-1. Add an icon (`dxt/icon.png`, 256×256 PNG, transparent or branded background).
+1. Regenerate `dxt/icon.png` and `dxt/icon-256.png` with `python dxt/icon_source/render_icon.py <Archivo-Variable.ttf>` when the brand changes. The icon is original Vangelder Solutions artwork; the Business Central logo itself is a Microsoft trademark and must not be used as a product icon.
 2. Make sure the `homepage`, `repository`, `support` and `documentation` URLs in `manifest.json` resolve.
 3. Ship a public version on GitHub (the fork is currently private).
 4. Follow the submission instructions at <https://github.com/anthropics/dxt> (typically a PR adding the extension's manifest URL to the directory index).
