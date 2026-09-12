@@ -156,11 +156,20 @@ In Business Central, in your target environment:
 python -m pip install --upgrade vgs-bc-mcp
 ```
 
-> **Renamed in 0.6.0.** Earlier releases were published as `360solutions-bc-mcp`. Installing
-> that name still pulls this package in, but switch your own commands over — the old PyPI
-> project is archived. The import package (`bc_mcp_proxy`), the `python -m bc_mcp_proxy`
-> command and the `.dxt` filenames are unchanged, so existing MCP client configurations keep
-> working.
+> **Renamed in 0.6.0.** Earlier releases were published as `360solutions-bc-mcp`. That project
+> is archived and stops at 0.5.7 — it does **not** upgrade into this one, so install the new
+> name explicitly. If you already have the old package, replace it rather than upgrading it:
+>
+> ```bash
+> python -m pip uninstall -y 360solutions-bc-mcp
+> python -m pip install --upgrade vgs-bc-mcp
+> ```
+>
+> Both distributions ship the same `bc_mcp_proxy` files, so having them installed side by side
+> means uninstalling either one takes the other's files with it. Keep only the new one.
+>
+> The import package (`bc_mcp_proxy`), the `python -m bc_mcp_proxy` command and the `.dxt`
+> filenames are unchanged, so existing MCP client configurations keep working.
 
 Or from source:
 
@@ -360,7 +369,7 @@ Token cache locations (when no custom auth header is supplied):
 - **JSON-RPC `-32603 "An error occurred."` with no detail.** This is BC's catch-all when something inside a dynamic-tool call goes wrong. The actual reason is logged to Azure Application Insights as event `RT0054` with custom dimension `toolInvocationFailureReason`. Enable telemetry on the BC environment and query (`traces | where customDimensions.eventId == 'RT0054' | where customDimensions.toolInvocationResult == 'Failure'`) to see what BC actually rejected.
 - **Frequent reconnects in logs.** Inspect upstream availability — the proxy logs `Upstream connection error (...); reconnecting in Xs (attempt N/M)` whenever it retries. After the configured budget the proxy gives up and the local stdio pipe closes.
 - **Repeated sign-in prompts.** The MSAL token cache may not be writable. Pass `--DeviceCacheLocation` to point at a directory you control.
-- **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade vgs-bc-mcp`).
+- **`No module named bc_mcp_proxy`.** Install the distribution into the same Python interpreter your MCP client is configured to launch (`python -m pip install --upgrade vgs-bc-mcp`). If this appeared right after you uninstalled or upgraded the old `360solutions-bc-mcp` package, that uninstall removed the shared `bc_mcp_proxy` files — restore them with `python -m pip install --force-reinstall vgs-bc-mcp`.
 
 ---
 
