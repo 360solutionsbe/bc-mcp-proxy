@@ -45,6 +45,7 @@ from .permissions import (
     annotate_permission_denied,
     detect_permission_denied,
     probe_static_permissions,
+    read_guard_permissions,
     static_page_id,
     static_verb,
 )
@@ -935,10 +936,15 @@ class _UpstreamConnectionManager:
     """Hide static tools for pages the user cannot read (opt-in)."""
     registry = self.permission_registry
     assert registry is not None
+    call = lambda name, args: session.call_tool(name, args)  # noqa: E731
     try:
-      outcome = await probe_static_permissions(
-          lambda name, args: session.call_tool(name, args),
-          tools_result, timeout=self.config.http_timeout_seconds, logger=self.logger)
+      outcome = await read_guard_permissions(
+          call, tools_result, timeout=self.config.http_timeout_seconds, logger=self.logger)
+      if outcome is not None:
+        self.logger.info("Using effectivePermissions from bc-mcp-guard (one call, write verdicts included)")
+      else:
+        outcome = await probe_static_permissions(
+            call, tools_result, timeout=self.config.http_timeout_seconds, logger=self.logger)
     except asyncio.CancelledError:
       raise
     except Exception as exc:  # noqa: BLE001 - hiding is best-effort
@@ -949,11 +955,19 @@ class _UpstreamConnectionManager:
           "Permission probe interrupted by an upstream session loss; keeping "
           "previous verdicts (%s)", registry.summary())
       return
-    registry.replace(outcome.denied, outcome.allowed)
-    self.logger.info(
-        "Permission probe: %d page(s) readable, %d without Read permission, "
-        "%d undetermined -- %s",
-        len(outcome.allowed), len(outcome.denied), outcome.unknown, registry.summary())
+    registry.replace(outcome.denied, outcome.allowed, outcome.denied_verbs, source=outcome.source)
+    if outcome.source == "bc-mcp-guard":
+      self.logger.info("bc-mcp-guard: %d page(s) hidden, %d readable page(s) with write tools hidden -- %s",
+                       len(outcome.denied), len(outcome.denied_verbs), registry.summary())
+      if outcome.filtered_pages:
+        self.logger.info("bc-mcp-guard: security filter active on %d page(s): %s",
+                         len(outcome.filtered_pages),
+                         ", ".join(f"PAG{p} ({f})" for p, f in sorted(outcome.filtered_pages.items())))
+    else:
+      self.logger.info(
+          "Permission probe: %d page(s) readable, %d without Read permission, "
+          "%d undetermined -- %s",
+          len(outcome.allowed), len(outcome.denied), outcome.unknown, registry.summary())
     if self.notifier is not None and self.tools_cache_obj is not None:
       # The filtered view differs from what the client holds -> list_changed.
       await self.notifier.maybe_notify(self.tools_cache_obj.get_any())

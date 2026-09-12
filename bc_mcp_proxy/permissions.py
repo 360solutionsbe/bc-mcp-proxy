@@ -29,6 +29,13 @@ This module gives the proxy two things:
   (and their write siblings) for pages the user cannot read. Business
   Central stays the enforcer; hiding is a courtesy to the client, never a
   security boundary.
+* `read_guard_permissions`: when the environment runs the open-source
+  companion app bc-mcp-guard (https://github.com/VangelderSolutions/bc-mcp-guard),
+  its `effectivePermissions` API page answers the same question in one call
+  and also knows about write permissions and page Execute, so the write
+  tools can be hidden per operation. The guard sees empty tables the user
+  may not read (a probe cannot); it does not see tables a page reads in code
+  besides its source table, so a live denial still hides a page.
 """
 
 from __future__ import annotations
@@ -76,6 +83,14 @@ _DENIAL_CODE_PREFIXES = ("Authorization_",)
 
 # Marker at the start of the proxy's note; also the idempotency guard.
 NOTE_MARKER = "[bc-mcp-proxy] Business Central refused this call"
+
+# The bc-mcp-guard companion's API page as BC names its static List tool
+# (entity set "effectivePermissions"; the page id is whatever the installing
+# partner chose).
+GUARD_TOOL_RE = re.compile(r"^List_?EffectivePermissions_PAG(?P<id>\d+)$", re.IGNORECASE)
+# Static verb -> the guard field that must be true for the tool to be usable.
+_VERB_FIELD = {"List": "canRead", "Create": "canInsert", "ListUpdate": "canModify",
+               "Delete": "canDelete", "": "canModify"}  # "" = bound action
 
 
 @dataclass(frozen=True)
@@ -261,6 +276,10 @@ class PermissionRegistry:
   def __init__(self) -> None:
     self._denied: dict[str, PermissionDenial] = {}
     self._allowed: set[str] = set()
+    # Per page: static verbs hidden on their own (write tools the guard says
+    # the user lacks a permission for, while the page stays readable).
+    self._denied_verbs: dict[str, set[str]] = {}
+    self._source: str = "none"
 
   @property
   def denied(self) -> dict[str, PermissionDenial]:
@@ -270,8 +289,20 @@ class PermissionRegistry:
   def allowed(self) -> frozenset[str]:
     return frozenset(self._allowed)
 
-  def replace(self, denied: dict[str, PermissionDenial], allowed: set[str]) -> None:
+  @property
+  def denied_verbs(self) -> dict[str, set[str]]:
+    return {k: set(v) for k, v in self._denied_verbs.items()}
+
+  @property
+  def source(self) -> str:
+    return self._source
+
+  def replace(self, denied: dict[str, PermissionDenial], allowed: set[str],
+              denied_verbs: Optional[dict[str, set[str]]] = None,
+              source: str = "probe") -> None:
     self._denied, self._allowed = dict(denied), set(allowed)
+    self._denied_verbs = {k: set(v) for k, v in (denied_verbs or {}).items() if v}
+    self._source = source
 
   def mark_denied(self, page_id: str, denial: PermissionDenial) -> bool:
     """Record a denial seen on a live call. True when it is new."""
@@ -283,10 +314,15 @@ class PermissionRegistry:
 
   def is_hidden(self, tool_name: str) -> bool:
     page_id = static_page_id(tool_name)
-    return page_id is not None and page_id in self._denied
+    if page_id is None or GUARD_TOOL_RE.match(tool_name):
+      return False  # never hide the guard's own page
+    if page_id in self._denied:
+      return True
+    verbs = self._denied_verbs.get(page_id)
+    return bool(verbs) and (static_verb(tool_name) or "") in verbs
 
   def filter(self, result: ListToolsResult) -> ListToolsResult:
-    if not self._denied:
+    if not self._denied and not self._denied_verbs:
       return result
     tools = list(getattr(result, "tools", None) or [])
     kept = [t for t in tools if not self.is_hidden(t.name)]
@@ -295,12 +331,16 @@ class PermissionRegistry:
     return result.model_copy(update={"tools": kept})
 
   def summary(self) -> str:
-    if not self._denied:
+    if not self._denied and not self._denied_verbs:
       return "no tools hidden"
     labels = sorted(
         f"PAG{page_id} ({d.object_label or 'permission refused'})"
         for page_id, d in self._denied.items())
-    return f"{len(labels)} page(s) hidden: {', '.join(labels)}"
+    text = f"{len(labels)} page(s) hidden: {', '.join(labels)}" if labels else "no page hidden entirely"
+    if self._denied_verbs:
+      writes = sum(len(v) for v in self._denied_verbs.values())
+      text += f"; {writes} write tool(s) hidden on {len(self._denied_verbs)} readable page(s)"
+    return text
 
 
 @dataclass
@@ -309,6 +349,107 @@ class ProbeOutcome:
   allowed: set[str] = field(default_factory=set)
   unknown: int = 0      # timeout / transient / structural error: stays visible
   aborted: bool = False  # upstream session died mid-probe: verdicts incomplete
+  denied_verbs: dict[str, set[str]] = field(default_factory=dict)
+  source: str = "probe"
+  filtered_pages: dict[str, str] = field(default_factory=dict)  # page id -> security filter
+
+
+def guard_tool_name(tools_result: ListToolsResult) -> Optional[str]:
+  """The bc-mcp-guard List tool in this tool list, if the page is exposed."""
+  for tool in getattr(tools_result, "tools", None) or []:
+    if GUARD_TOOL_RE.match(tool.name):
+      return tool.name
+  return None
+
+
+def parse_guard_rows(text: str) -> Optional[list[dict[str, Any]]]:
+  """The `value` rows of an effectivePermissions result, or None if the text
+  is not such a result (BC prefixes the JSON with a sentence)."""
+  start = text.find("{")
+  if start < 0:
+    return None
+  try:
+    payload = json.loads(text[start:])
+  except ValueError:
+    return None
+  rows = payload.get("value") if isinstance(payload, dict) else None
+  if not isinstance(rows, list):
+    return None
+  for row in rows:
+    if not isinstance(row, dict) or "pageId" not in row or "canRead" not in row:
+      return None
+  return rows
+
+
+def verdicts_from_guard(rows: list[dict[str, Any]]) -> ProbeOutcome:
+  """Turn guard rows into registry verdicts.
+
+  A page is hidden entirely when the user lacks Execute on the page or Read
+  on its source table (both are certain failures at the MCP server). Write
+  verbs are hidden individually. `canRead=true` is not recorded as allowed:
+  the page may still read a second table the user lacks, and a live denial
+  must be able to hide it later.
+  """
+  outcome = ProbeOutcome(source="bc-mcp-guard")
+  for row in rows:
+    page_id = str(row.get("pageId"))
+    name = str(row.get("pageName") or "")
+    table = str(row.get("sourceTableName") or "")
+    table_id = row.get("sourceTableId")
+    if row.get("canExecute") is False:
+      outcome.denied[page_id] = PermissionDenial(
+          code=None, message="bc-mcp-guard: no Execute permission on the page",
+          kind="Page", object_id=int(page_id) if page_id.isdigit() else None,
+          object_name=name, permission="Execute")
+      continue
+    if row.get("canRead") is False:
+      outcome.denied[page_id] = PermissionDenial(
+          code=None, message="bc-mcp-guard: no Read permission on the source table",
+          kind="TableData", object_id=table_id if isinstance(table_id, int) else None,
+          object_name=table or name, permission="Read")
+      continue
+    hidden = {verb for verb, field_name in _VERB_FIELD.items()
+              if verb != "List" and row.get(field_name) is False}
+    if hidden:
+      outcome.denied_verbs[page_id] = hidden
+    if row.get("hasSecurityFilter"):
+      outcome.filtered_pages[page_id] = str(row.get("securityFilter") or "")
+  return outcome
+
+
+async def read_guard_permissions(
+    call_tool: Callable[[str, dict[str, Any]], Awaitable[CallToolResult]],
+    tools_result: ListToolsResult,
+    *,
+    timeout: float,
+    logger: Optional[logging.Logger] = None,
+) -> Optional[ProbeOutcome]:
+  """One call to bc-mcp-guard's page instead of a probe per List tool.
+
+  Returns None when the page is not in the tool list or the call did not
+  yield usable rows (the caller then falls back to the probe)."""
+  log = logger or logging.getLogger("bc_mcp_proxy")
+  name = guard_tool_name(tools_result)
+  if name is None:
+    return None
+  tool = next(t for t in tools_result.tools if t.name == name)
+  args = {key: 5000 for key in probe_arguments(tool)}  # top=5000: every page
+  try:
+    result = await asyncio.wait_for(call_tool(name, args), timeout)
+  except asyncio.CancelledError:
+    raise
+  except Exception as exc:  # noqa: BLE001 - fall back to the probe
+    log.warning("bc-mcp-guard call %s failed (%s); falling back to the probe", name, type(exc).__name__)
+    return None
+  if detect_permission_denied(result) is not None or getattr(result, "isError", False):
+    log.warning("bc-mcp-guard page %s refused for this user; falling back to the probe", name)
+    return None
+  text = "\n".join(getattr(c, "text", "") for c in (result.content or []) if getattr(c, "text", None))
+  rows = parse_guard_rows(text)
+  if rows is None:
+    log.warning("bc-mcp-guard result from %s not understood; falling back to the probe", name)
+    return None
+  return verdicts_from_guard(rows)
 
 
 def _is_session_terminated(exc: BaseException) -> bool:
